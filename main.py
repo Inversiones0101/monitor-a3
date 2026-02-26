@@ -7,13 +7,16 @@ import os
 # --- CONFIGURACIÓN ---
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+MAE_KEY = os.getenv('MAE_API_KEY') # Nueva llave
 CSV_FILE = 'datos_dia.csv'
 URL_CAUCIONES = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/cauciones"
 URL_RENTA_FIJA = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/rentafija"
 
 def obtener_precio(url, ticker_buscado, campo_valor):
     try:
-        response = requests.get(url, timeout=10)
+        # Agregamos la API Key en el encabezado
+        headers = {'X-API-KEY': MAE_KEY} if MAE_KEY else {}
+        response = requests.get(url, headers=headers, timeout=10)
         data = response.json()
         for item in data:
             if item.get('ticker') == ticker_buscado:
