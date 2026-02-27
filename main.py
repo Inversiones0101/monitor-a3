@@ -13,26 +13,24 @@ URL_CAUCIONES = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/cauci
 URL_RENTA_FIJA = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/rentafija"
 
 def obtener_precio(url, ticker_buscado, campo_valor):
+    """Captura datos de la API del MAE usando la API KEY."""
     try:
-        # IMPORTANTE: Asegúrate de que MAE_KEY no esté vacío
         if not MAE_KEY:
             print("Error: MAE_API_KEY no configurada en Secrets")
             return None
 
         headers = {
             'X-API-KEY': MAE_KEY,
-            'User-Agent': 'Mozilla/5.0' # Algunos servidores bloquean si no hay User-Agent
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code != 200:
             print(f"Error API MAE para {ticker_buscado}: Código {response.status_code}")
-            # Si el código es 401 o 403, la API KEY está mal o expiró
             return None
             
         data = response.json()
-        # Verificamos que 'data' sea una lista
         if isinstance(data, list):
             for item in data:
                 if item.get('ticker') == ticker_buscado:
@@ -43,75 +41,88 @@ def obtener_precio(url, ticker_buscado, campo_valor):
     return None
 
 def manejar_datos():
+    """Gestiona la captura de precios y el guardado en el archivo CSV."""
     ahora = datetime.now()
-    hora_actual = ahora.hour
+    hora_actual_utc = ahora.hour
     timestamp = ahora.strftime('%Y-%m-%d %H:%M')
 
-    # 1. Si son las 18hs o más, limpiamos el archivo para mañana
-    #if hora_actual >= 18:
-    #    df_vacio = pd.DataFrame(columns=['timestamp', 'activo', 'valor'])
-    #   df_vacio.to_csv(CSV_FILE, index=False)
-    #    print("Cierre de mercado: Archivo limpiado para mañana.")
-    #    return
+    # 1. Limpieza automática al cierre (21hs UTC = 18hs Argentina)
+    if hora_actual_utc >= 21: 
+        if os.path.exists(CSV_FILE):
+            os.remove(CSV_FILE)
+            print("Cierre de mercado: Archivo eliminado para limpieza.")
+        return
 
-    # 2. Captura de datos
+    # 2. Captura de datos reales
     datos = []
-    # Caución 1D (usamos 'ultimaTasa')
-    tasa = obtener_precio(URL_CAUCIONES, "CAARS", "ultimaTasa")
-    if tasa: datos.append([timestamp, 'Caucion_1D', tasa])
     
-    # Bonos (usamos 'precioUltimo')
+    # Caución 1D
+    tasa = obtener_precio(URL_CAUCIONES, "CAARS", "ultimaTasa")
+    if tasa: 
+        datos.append([timestamp, 'Caucion_1D', tasa])
+    
+    # Bonos AL30 y GD30
     for bono in ["AL30", "GD30"]:
         precio = obtener_precio(URL_RENTA_FIJA, bono, "precioUltimo")
-        if precio: datos.append([timestamp, bono, precio])
+        if precio: 
+            datos.append([timestamp, bono, precio])
 
-    # LÍNEA DE PRUEBA PARA FIN DE SEMANA:
-        datos.append([timestamp, 'PRUEBA_EXITO', 100.0])
-
-    # 3. Guardar en CSV
+    # 3. Guardar en CSV si hay datos nuevos
     if datos:
         df_nuevos = pd.DataFrame(datos, columns=['timestamp', 'activo', 'valor'])
         df_nuevos.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
         print(f"Datos guardados a las {timestamp}")
+    else:
+        print("No se obtuvieron datos de la API (Mercado cerrado o sin operaciones).")
 
 def generar_y_enviar_reporte():
+    """Genera el gráfico y lo envía al grupo de Telegram."""
     if not os.path.exists(CSV_FILE) or os.stat(CSV_FILE).st_size == 0:
+        print("No hay datos suficientes para graficar.")
         return
 
     df = pd.read_csv(CSV_FILE)
-    if df.empty: return
-    
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     activos = df['activo'].unique()
     
+    # Configuramos el diseño del gráfico
     fig, axes = plt.subplots(len(activos), 1, figsize=(10, 5 * len(activos)))
     if len(activos) == 1: axes = [axes]
 
     for i, activo in enumerate(activos):
         sub_df = df[df['activo'] == activo]
-        axes[i].plot(sub_df['timestamp'], sub_df['valor'], marker='s', color='green' if '30' in activo else 'blue')
-        axes[i].set_title(f'Evolución Intradiaria: {activo}')
-        axes[i].grid(True)
+        color = 'green' if '30' in activo else 'blue'
+        
+        axes[i].plot(sub_df['timestamp'], sub_df['valor'], marker='o', linestyle='-', color=color, linewidth=2)
+        axes[i].set_title(f'Evolución Intradiaria: {activo}', fontsize=14, fontweight='bold', pad=15)
+        axes[i].grid(True, linestyle='--', alpha=0.6)
+        axes[i].set_ylabel('Precio / Tasa')
+        axes[i].tick_params(axis='x', rotation=30)
 
     plt.tight_layout()
-    plt.savefig('reporte.png')
+    plt.savefig('reporte.png', dpi=100)
+    plt.close()
     
-    # Enviar a Telegram
+    # Enviar a Telegram con verificación
     url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    with open('reporte.png', 'rb') as f:
-        requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': f'📈 Monitor A3 - Actualizado {datetime.now().strftime("%H:%M")}'}, files={'photo': f})
-
-# Enviar a Telegram con verificación
-    url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    with open('reporte.png', 'rb') as f:
-        r = requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': f'📈 Monitor A3 - {datetime.now().strftime("%H:%M")}'}, files={'photo': f})
-        if r.status_code != 200:
-            # Si la foto falla, intentamos mandar un texto para saber que el bot está vivo
-            url_text = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-            requests.post(url_text, data={'chat_id': CHAT_ID, 'text': f"Error enviando imagen: {r.text}"})
+    try:
+        with open('reporte.png', 'rb') as f:
+            caption_text = f'📈 Monitor A3 - {datetime.now().strftime("%d/%m %H:%M")}'
+            payload = {'chat_id': CHAT_ID, 'caption': caption_text}
+            files = {'photo': f}
+            r = requests.post(url_tel, data=payload, files=files, timeout=25)
             
+            if r.status_code == 200:
+                print("¡Reporte enviado exitosamente!")
+            else:
+                print(f"Error de Telegram: {r.status_code} - {r.text}")
+                # Reintento de emergencia solo con texto si falla la imagen
+                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                             data={'chat_id': CHAT_ID, 'text': f"⚠️ Error enviando imagen: {r.text}"})
+    except Exception as e:
+        print(f"Error crítico en el proceso de envío: {e}")
 
-# Al final del archivo, forzamos el reporte aunque falle la captura de hoy
-manejar_datos()
-print("Intentando generar reporte con datos acumulados...") # Para ver en el log
-generar_y_enviar_reporte()
+# --- INICIO DEL SCRIPT ---
+if __name__ == "__main__":
+    manejar_datos()
+    generar_y_enviar_reporte()
