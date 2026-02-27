@@ -31,11 +31,11 @@ def manejar_datos():
     timestamp = ahora.strftime('%Y-%m-%d %H:%M')
 
     # 1. Si son las 18hs o más, limpiamos el archivo para mañana
-    if hora_actual >= 18:
-        df_vacio = pd.DataFrame(columns=['timestamp', 'activo', 'valor'])
-        df_vacio.to_csv(CSV_FILE, index=False)
-        print("Cierre de mercado: Archivo limpiado para mañana.")
-        return
+    #if hora_actual >= 18:
+    #    df_vacio = pd.DataFrame(columns=['timestamp', 'activo', 'valor'])
+    #   df_vacio.to_csv(CSV_FILE, index=False)
+    #    print("Cierre de mercado: Archivo limpiado para mañana.")
+    #    return
 
     # 2. Captura de datos
     datos = []
