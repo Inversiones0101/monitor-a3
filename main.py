@@ -65,6 +65,9 @@ def manejar_datos():
         precio = obtener_precio(URL_RENTA_FIJA, bono, "precioUltimo")
         if precio: datos.append([timestamp, bono, precio])
 
+    # LÍNEA DE PRUEBA PARA FIN DE SEMANA:
+        datos.append([timestamp, 'PRUEBA_EXITO', 100.0])
+
     # 3. Guardar en CSV
     if datos:
         df_nuevos = pd.DataFrame(datos, columns=['timestamp', 'activo', 'valor'])
