@@ -14,19 +14,30 @@ URL_RENTA_FIJA = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/rent
 
 def obtener_precio(url, ticker_buscado, campo_valor):
     try:
-        # Aquí está el secreto: enviamos la MAE_KEY en el "header"
-        headers = {'X-API-KEY': MAE_KEY} if MAE_KEY else {}
-        response = requests.get(url, headers=headers, timeout=10)
+        # IMPORTANTE: Asegúrate de que MAE_KEY no esté vacío
+        if not MAE_KEY:
+            print("Error: MAE_API_KEY no configurada en Secrets")
+            return None
+
+        headers = {
+            'X-API-KEY': MAE_KEY,
+            'User-Agent': 'Mozilla/5.0' # Algunos servidores bloquean si no hay User-Agent
+        }
         
-        # Si la respuesta no es 200 (OK), lanzamos error
+        response = requests.get(url, headers=headers, timeout=15)
+        
         if response.status_code != 200:
-            print(f"Error API MAE: Código {response.status_code}")
+            print(f"Error API MAE para {ticker_buscado}: Código {response.status_code}")
+            # Si el código es 401 o 403, la API KEY está mal o expiró
             return None
             
         data = response.json()
-        for item in data:
-            if item.get('ticker') == ticker_buscado:
-                return float(item.get(campo_valor, 0))
+        # Verificamos que 'data' sea una lista
+        if isinstance(data, list):
+            for item in data:
+                if item.get('ticker') == ticker_buscado:
+                    valor = item.get(campo_valor)
+                    return float(valor) if valor is not None else None
     except Exception as e:
         print(f"Error capturando {ticker_buscado}: {e}")
     return None
@@ -87,7 +98,17 @@ def generar_y_enviar_reporte():
     with open('reporte.png', 'rb') as f:
         requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': f'📈 Monitor A3 - Actualizado {datetime.now().strftime("%H:%M")}'}, files={'photo': f})
 
-# Ejecución
+# Enviar a Telegram con verificación
+    url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    with open('reporte.png', 'rb') as f:
+        r = requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': f'📈 Monitor A3 - {datetime.now().strftime("%H:%M")}'}, files={'photo': f})
+        if r.status_code != 200:
+            # Si la foto falla, intentamos mandar un texto para saber que el bot está vivo
+            url_text = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+            requests.post(url_text, data={'chat_id': CHAT_ID, 'text': f"Error enviando imagen: {r.text}"})
+            
+
+# Al final del archivo, forzamos el reporte aunque falle la captura de hoy
 manejar_datos()
-# Aquí podrías poner una condición para que solo envíe el gráfico cada 1 hora
+print("Intentando generar reporte con datos acumulados...") # Para ver en el log
 generar_y_enviar_reporte()
