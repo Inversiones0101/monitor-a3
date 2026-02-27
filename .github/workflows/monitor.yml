@@ -23,6 +23,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MAE_API_KEY: ${{ secrets.MAE_API_KEY }}  # <--- AGREGÁ ESTA LÍNEA SI NO ESTÁ
         run: python main.py
 
       - name: Commit changes
