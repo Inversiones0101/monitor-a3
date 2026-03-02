@@ -15,14 +15,20 @@ URL_CAUCIONES = "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/cauci
 URL_RENTA_FIJA = "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/rentafija"
 
 def obtener_datos_mae(url):
-    """Consulta la API y devuelve el JSON si es exitoso."""
     try:
-        # Probamos con 'x-api-key' en minúsculas como sugiere la documentación técnica
-        headers = {'x-api-key': MAE_KEY, 'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers, timeout=10)
+        # Agregamos un User-Agent más completo para evitar el bloqueo 403
+        headers = {
+            'x-api-key': MAE_KEY, 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+        }
+        r = requests.get(url, headers=headers, timeout=15)
+        
         if r.status_code == 200:
             return r.json()
-        print(f"Error API: Código {r.status_code}")
+        
+        # Esto te dirá en el log exactamente por qué te rebota (403, 401, etc.)
+        print(f"Error API: Código {r.status_code} en URL {url}")
     except Exception as e:
         print(f"Error de conexión: {e}")
     return None
