@@ -9,102 +9,107 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 MAE_KEY = os.getenv('MAE_API_KEY')
 CSV_FILE = 'datos_dia.csv'
-URL_CAUCIONES = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/cauciones"
-URL_RENTA_FIJA = "https://marketdata.mae.com.ar/api/v1/mercado/cotizaciones/rentafija"
 
-def obtener_precio(url, ticker_buscado, moneda_buscada):
-    """Captura datos filtrando por Ticker y Moneda (ARS o USD)."""
+# URLs ACTUALIZADAS SEGÚN ENDPOINTS DE A3
+URL_CAUCIONES = "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/cauciones"
+URL_RENTA_FIJA = "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/rentafija"
+
+def obtener_datos_mae(url):
+    """Consulta la API y devuelve el JSON si es exitoso."""
     try:
-        if not MAE_KEY: return None
-        headers = {'X-API-KEY': MAE_KEY, 'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            for item in data:
-                # Filtramos por Ticker y por Moneda
-                if item.get('ticker') == ticker_buscado and item.get('monedaEscrituracion') == moneda_buscada:
-                    valor = item.get('precioUltimo')
-                    return float(valor) if valor is not None else None
+        # Probamos con 'x-api-key' en minúsculas como sugiere la documentación técnica
+        headers = {'x-api-key': MAE_KEY, 'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+        print(f"Error API: Código {r.status_code}")
     except Exception as e:
-        print(f"Error en API para {ticker_buscado} {moneda_buscada}: {e}")
+        print(f"Error de conexión: {e}")
     return None
 
 def manejar_datos():
     ahora = datetime.now()
     timestamp = ahora.strftime('%Y-%m-%d %H:%M')
+    
+    # 1. Limpieza al cierre (21hs UTC / 18hs ARG)
+    if ahora.hour >= 21:
+        if os.path.exists(CSV_FILE): os.remove(CSV_FILE)
+        return
 
-    # 1. Captura de datos específicos
+    # 2. Captura de Renta Fija (AL30 ARS y USD)
     datos = []
+    rf_data = obtener_datos_mae(URL_RENTA_FIJA)
     
-    # AL30 en Pesos
-    p_ars = obtener_precio(URL_RENTA_FIJA, "AL30", "ARS")
-    if p_ars: datos.append([timestamp, 'AL30_ARS', p_ars])
-    
-    # AL30 en Dólares
-    p_usd = obtener_precio(URL_RENTA_FIJA, "AL30", "USD")
-    if p_usd: datos.append([timestamp, 'AL30_USD', p_usd])
-    
-    # Caución
-    tasa = obtener_precio(URL_CAUCIONES, "CAARS", "ARS") # Las cauciones suelen ser ARS
-    if tasa: datos.append([timestamp, 'Caucion', tasa])
+    if rf_data and isinstance(rf_data, list):
+        for item in rf_data:
+            ticker = item.get('ticker')
+            moneda = item.get('monedaEscrituracion')
+            precio = item.get('precioUltimo')
+            
+            if ticker == 'AL30' and precio:
+                if moneda == 'ARS':
+                    datos.append([timestamp, 'AL30_ARS', float(precio)])
+                elif moneda == 'USD':
+                    datos.append([timestamp, 'AL30_USD', float(precio)])
 
-    # 2. Guardar en CSV
+    # 3. Guardar en CSV
     if datos:
         df_nuevos = pd.DataFrame(datos, columns=['timestamp', 'activo', 'valor'])
         df_nuevos.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
-        print(f"Datos guardados: {datos}")
+        print(f"Datos reales guardados: {len(datos)} registros.")
     else:
-        print("API MAE no devolvió datos para los filtros seleccionados.")
-        
+        # Si falla la API, no guardamos nada (evitamos el punto de prueba azul)
+        print("No se recibieron datos reales en esta vuelta.")
+
 def generar_y_enviar_reporte():
-    """Genera el gráfico y lo envía al grupo de Telegram."""
     if not os.path.exists(CSV_FILE) or os.stat(CSV_FILE).st_size == 0:
-        print("No hay datos suficientes para graficar.")
         return
 
     df = pd.read_csv(CSV_FILE)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    activos = df['activo'].unique()
     
-    # Configuramos el diseño del gráfico
-    fig, axes = plt.subplots(len(activos), 1, figsize=(10, 5 * len(activos)))
-    if len(activos) == 1: axes = [axes]
+    # --- GRÁFICO PROFESIONAL DOBLE EJE ---
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx() # Segundo eje para dólares
 
-    for i, activo in enumerate(activos):
-        sub_df = df[df['activo'] == activo]
-        color = 'green' if '30' in activo else 'blue'
-        
-        axes[i].plot(sub_df['timestamp'], sub_df['valor'], marker='o', linestyle='-', color=color, linewidth=2)
-        axes[i].set_title(f'Evolución Intradiaria: {activo}', fontsize=14, fontweight='bold', pad=15)
-        axes[i].grid(True, linestyle='--', alpha=0.6)
-        axes[i].set_ylabel('Precio / Tasa')
-        axes[i].tick_params(axis='x', rotation=30)
+    # Línea Amarilla (Pesos)
+    df_ars = df[df['activo'] == 'AL30_ARS']
+    if not df_ars.empty:
+        ax1.plot(df_ars['timestamp'], df_ars['valor'], color='gold', label='AL30 Pesos ($)', marker='o', linewidth=2)
+    
+    # Línea Verde (Dólares)
+    df_usd = df[df['activo'] == 'AL30_USD']
+    if not df_usd.empty:
+        ax2.plot(df_usd['timestamp'], df_usd['valor'], color='green', label='AL30 USD (u$s)', marker='s', linewidth=2)
+
+    # Estética del Gráfico
+    ax1.set_ylabel('Precio Pesos ($)', color='orange', fontweight='bold')
+    ax2.set_ylabel('Precio Dólares (u$s)', color='green', fontweight='bold')
+    plt.title(f'Monitor AL30 Multimoneda - {datetime.now().strftime("%H:%M")}', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    
+    # Combinar leyendas
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines + lines2, labels + labels2, loc='upper left')
 
     plt.tight_layout()
-    plt.savefig('reporte.png', dpi=100)
+    plt.savefig('reporte.png')
     plt.close()
-    
-    # Enviar a Telegram con verificación
-    url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    try:
-        with open('reporte.png', 'rb') as f:
-            caption_text = f'📈 Monitor A3 - {datetime.now().strftime("%d/%m %H:%M")}'
-            payload = {'chat_id': CHAT_ID, 'caption': caption_text}
-            files = {'photo': f}
-            r = requests.post(url_tel, data=payload, files=files, timeout=25)
-            
-            if r.status_code == 200:
-                print("¡Reporte enviado exitosamente!")
-            else:
-                print(f"Error de Telegram: {r.status_code} - {r.text}")
-                # Reintento de emergencia solo con texto si falla la imagen
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                             data={'chat_id': CHAT_ID, 'text': f"⚠️ Error enviando imagen: {r.text}"})
-    except Exception as e:
-        print(f"Error crítico en el proceso de envío: {e}")
 
-# --- INICIO DEL SCRIPT ---
+    # Calcular MEP actual para el mensaje
+    mep_text = ""
+    if not df_ars.empty and not df_usd.empty:
+        val_ars = df_ars['valor'].iloc[-1]
+        val_usd = df_usd['valor'].iloc[-1]
+        mep_text = f"\n💵 *Dólar MEP:* ${round(val_ars / val_usd, 2)}"
+
+    # Enviar a Telegram
+    url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    with open('reporte.png', 'rb') as f:
+        caption = f"📈 *Actualización de Mercado*{mep_text}\n🕒 {datetime.now().strftime('%H:%M')}"
+        requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
+
 if __name__ == "__main__":
     manejar_datos()
     generar_y_enviar_reporte()
