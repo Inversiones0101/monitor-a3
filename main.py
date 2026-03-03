@@ -4,58 +4,56 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN TELEGRAM ---
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-MAE_KEY = os.getenv('MAE_API_KEY')
 CSV_FILE = 'datos_dia.csv'
 
-# URLs OFICIALES DE A3
-URL_RENTA_FIJA = "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/rentafija"
+# --- FUENTES DE DATOS (JSON de Gráficos) ---
+URL_AL30_ARS = "https://mercados.ambito.com/al30/grafico/intradiario"
+URL_AL30_USD = "https://mercados.ambito.com/al30d/grafico/intradiario"
 
-def obtener_datos_mae(url):
-    """Consulta la API con headers de navegación real para evitar Error 403."""
+def obtener_ultimo_del_grafico(url):
+    """Extrae el último punto [hora, precio] de la tira del gráfico."""
     try:
-        headers = {
-            'x-api-key': MAE_KEY,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'es-AR,es;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Referer': 'https://marketdata.mae.com.ar/',
-            'Origin': 'https://marketdata.mae.com.ar'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         r = requests.get(url, headers=headers, timeout=15)
-        
         if r.status_code == 200:
-            print("¡Conexión exitosa! Datos recibidos.")
-            return r.json()
-        else:
-            print(f"Error API: Código {r.status_code}. El servidor sigue bloqueando.")
+            datos = r.json() # Formato: [["HH:mm", precio], ...]
+            if len(datos) > 1:
+                # El primer elemento suele ser encabezado, tomamos el último real
+                ultimo_punto = datos[-1]
+                return float(ultimo_punto[1])
     except Exception as e:
-        print(f"Error de conexión: {e}")
+        print(f"Error extrayendo de {url}: {e}")
     return None
 
 def manejar_datos():
     ahora = datetime.now()
     timestamp = ahora.strftime('%Y-%m-%d %H:%M')
     
-    rf_data = obtener_datos_mae(URL_RENTA_FIJA)
-    datos = []
-    
-    if rf_data and isinstance(rf_data, list):
-        for item in rf_data:
-            ticker = item.get('ticker')
-            moneda = item.get('monedaEscrituracion')
-            precio = item.get('precioUltimo')
-            
-            # Filtramos AL30 en ambas monedas
-            if ticker == 'AL30' and precio:
-                label = f"AL30_{moneda}"
-                datos.append([timestamp, label, float(precio)])
+    # 1. Limpieza al cierre (18hs ARG / 21hs UTC)
+    if ahora.hour >= 21:
+        if os.path.exists(CSV_FILE): os.remove(CSV_FILE)
+        return False
 
-    if datos:
-        df_nuevos = pd.DataFrame(datos, columns=['timestamp', 'activo', 'valor'])
-        df_nuevos.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
+    # 2. Captura de Precios
+    p_ars = obtener_ultimo_del_grafico(URL_AL30_ARS)
+    p_usd = obtener_ultimo_del_grafico(URL_AL30_USD)
+    
+    datos_nuevos = []
+    if p_ars: datos_nuevos.append([timestamp, 'AL30_ARS', p_ars])
+    if p_usd: datos_nuevos.append([timestamp, 'AL30_USD', p_usd])
+    
+    # 3. Cálculo del MEP (Línea Roja)
+    if p_ars and p_usd:
+        mep = round(p_ars / p_usd, 2)
+        datos_nuevos.append([timestamp, 'MEP', mep])
+
+    # 4. Guardar en CSV
+    if datos_nuevos:
+        df = pd.DataFrame(datos_nuevos, columns=['timestamp', 'activo', 'valor'])
+        df.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
         return True
     return False
 
@@ -63,35 +61,51 @@ def generar_y_enviar_reporte():
     if not os.path.exists(CSV_FILE): return
     
     df = pd.read_csv(CSV_FILE)
-    if df.empty: return
-    
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-
-    # AL30 Pesos
+    # Creamos el gráfico con Doble Eje Y
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    ax2 = ax1.twinx() # Eje para Dólares/MEP
+    
+    # --- LÍNEA AMARILLA: AL30 PESOS ---
     df_ars = df[df['activo'] == 'AL30_ARS']
     if not df_ars.empty:
-        ax1.plot(df_ars['timestamp'], df_ars['valor'], color='gold', label='AL30 ARS ($)', marker='o')
+        ax1.plot(df_ars['timestamp'], df_ars['valor'], color='#FFD700', label='AL30 Pesos ($)', linewidth=3, marker='o', markersize=4)
     
-    # AL30 Dólares
+    # --- LÍNEA VERDE: AL30 USD ---
     df_usd = df[df['activo'] == 'AL30_USD']
     if not df_usd.empty:
-        ax2.plot(df_usd['timestamp'], df_usd['valor'], color='green', label='AL30 USD (u$s)', marker='s')
-
-    ax1.set_ylabel('Precio Pesos ($)', color='orange')
-    ax2.set_ylabel('Precio Dólares (u$s)', color='green')
-    plt.title(f'Monitor AL30 Final de Rueda - {datetime.now().strftime("%H:%M")}')
+        ax2.plot(df_usd['timestamp'], df_usd['valor'], color='#228B22', label='AL30 USD (u$s)', linewidth=2, linestyle='--')
     
-    plt.savefig('reporte.png')
+    # --- LÍNEA ROJA: MEP ---
+    df_mep = df[df['activo'] == 'MEP']
+    if not df_mep.empty:
+        ax2.plot(df_mep['timestamp'], df_mep['valor'], color='#FF0000', label='Dólar MEP', linewidth=2)
+
+    # Configuración visual
+    ax1.set_ylabel('Precio Pesos ($)', color='orange', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Dólar MEP / Bono USD', color='green', fontsize=12, fontweight='bold')
+    plt.title(f'Monitor AL30 Multimoneda - {datetime.now().strftime("%d/%m %H:%M")}', fontsize=14, pad=20)
+    ax1.grid(True, alpha=0.2)
+    
+    # Leyendas unificadas
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines + lines2, labels + labels2, loc='upper left', frameon=True)
+
+    plt.tight_layout()
+    plt.savefig('reporte.png', dpi=120)
     plt.close()
 
-    # Enviar a Telegram
-    url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    with open('reporte.png', 'rb') as f:
-        caption = f"🏁 *Cierre de Rueda*\nMonitor AL30 con Headers de Navegación."
-        requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
+    # Envío a Telegram
+    try:
+        url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+        with open('reporte.png', 'rb') as f:
+            mep_val = df_mep['valor'].iloc[-1] if not df_mep.empty else "N/A"
+            caption = f"📊 *Actualización Realtime*\n💵 MEP: ${mep_val}\n🕒 {datetime.now().strftime('%H:%M hs')}"
+            requests.post(url_tel, data={'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
+    except Exception as e:
+        print(f"Error envío: {e}")
 
 if __name__ == "__main__":
     if manejar_datos():
