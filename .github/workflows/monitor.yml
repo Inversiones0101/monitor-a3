@@ -1,8 +1,11 @@
 name: Monitor A3 Realtime
 on:
   schedule:
-    - cron: '*/5 13-21 * * 1-5' # Cada 5 min, de 10hs a 18hs (horario UTC) de lunes a viernes
-  workflow_dispatch: # Permite ejecutarlo manualmente
+    - cron: '*/5 13-21 * * 1-5' # De 10hs a 18hs ARG
+  workflow_dispatch:
+
+permissions:
+  contents: write  # <--- ESTO ES CLAVE para que el bot pueda guardar el CSV
 
 jobs:
   build:
@@ -17,13 +20,12 @@ jobs:
           python-version: '3.9'
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install requests pandas matplotlib
 
       - name: Run Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MAE_API_KEY: ${{ secrets.MAE_API_KEY }}  # <--- AGREGÁ ESTA LÍNEA SI NO ESTÁ
         run: python main.py
 
       - name: Commit changes
@@ -31,5 +33,5 @@ jobs:
           git config --global user.name "actions-user"
           git config --global user.email "actions@github.com"
           git add datos_dia.csv
-          git commit -m "Actualizar precios intradía [skip ci]" || echo "No hay cambios"
+          git commit -m "Actualizar precios desde grafico [skip ci]" || echo "No hay cambios"
           git push
