@@ -108,5 +108,17 @@ def generar_y_enviar_reporte():
         print(f"Error envío: {e}")
 
 if __name__ == "__main__":
-    if manejar_datos():
-        generar_y_enviar_reporte()
+    # 1. Siempre intentamos capturar datos y guardarlos cada 5 minutos
+    datos_guardados_ok = manejar_datos()
+    
+    if datos_guardados_ok:
+        ahora = datetime.now()
+        
+        # 2. SOLO envía a Telegram si estamos cerca de la "hora en punto"
+        # Esto disparará el reporte a las 11:00, 12:00, 13:00, etc.
+        if ahora.minute < 5: 
+            print("Es hora del reporte horario. Generando gráfico...")
+            generar_y_enviar_reporte()
+        else:
+            print(f"Dato guardado a las {ahora.strftime('%H:%M')}. El próximo gráfico se enviará a la hora en punto.")
+            
