@@ -32,6 +32,8 @@ jobs:
         run: |
           git config --global user.name "actions-user"
           git config --global user.email "actions@github.com"
-          git add datos_dia.csv
-          git commit -m "Actualizar precios desde grafico [skip ci]" || echo "No hay cambios"
-          git push
+          # El '|| true' evita que el workflow se ponga rojo si el archivo no está
+          git add datos_dia.csv || true 
+          git commit -m "Actualizar precios desde grafico [skip ci]" || echo "No hay cambios para guardar"
+          git push || echo "Nada para subir"
+          
