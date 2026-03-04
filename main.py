@@ -28,34 +28,41 @@ def obtener_ultimo_del_grafico(url):
         print(f"Error extrayendo de {url}: {e}")
     return None
 
+def obtener_datos_grafico(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code == 200:
+            return r.json() # Devuelve la lista completa [[hora, precio], ...]
+    except:
+        return []
+
 def manejar_datos():
     ahora = datetime.now()
-    timestamp = ahora.strftime('%Y-%m-%d %H:%M')
+    # Capturamos las tiras completas
+    datos_ars = obtener_datos_grafico(URL_AL30_ARS)
+    datos_usd = obtener_datos_grafico(URL_AL30_USD)
     
-    # 1. Limpieza al cierre (18hs ARG / 21hs UTC)
-    if ahora.hour >= 21:
-        if os.path.exists(CSV_FILE): os.remove(CSV_FILE)
+    if not datos_ars or not datos_usd:
+        print("Aún no hay datos en la fuente. Reintentando en la próxima corrida.")
         return False
 
-    # 2. Captura de Precios
-    p_ars = obtener_ultimo_del_grafico(URL_AL30_ARS)
-    p_usd = obtener_ultimo_del_grafico(URL_AL30_USD)
+    # Armamos un DataFrame con lo que haya
+    # Usamos el último precio disponible de la tira
+    p_ars = float(datos_ars[-1][1])
+    p_usd = float(datos_usd[-1][1])
+    mep = round(p_ars / p_usd, 2)
     
-    datos_nuevos = []
-    if p_ars: datos_nuevos.append([timestamp, 'AL30_ARS', p_ars])
-    if p_usd: datos_nuevos.append([timestamp, 'AL30_USD', p_usd])
+    timestamp = ahora.strftime('%Y-%m-%d %H:%M')
+    nuevos = [
+        {'timestamp': timestamp, 'activo': 'AL30_ARS', 'valor': p_ars},
+        {'timestamp': timestamp, 'activo': 'AL30_USD', 'valor': p_usd},
+        {'timestamp': timestamp, 'activo': 'MEP', 'valor': mep}
+    ]
     
-    # 3. Cálculo del MEP (Línea Roja)
-    if p_ars and p_usd:
-        mep = round(p_ars / p_usd, 2)
-        datos_nuevos.append([timestamp, 'MEP', mep])
-
-    # 4. Guardar en CSV
-    if datos_nuevos:
-        df = pd.DataFrame(datos_nuevos, columns=['timestamp', 'activo', 'valor'])
-        df.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
-        return True
-    return False
+    df_nuevos = pd.DataFrame(nuevos)
+    df_nuevos.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
+    return True
 
 def generar_y_enviar_reporte():
     if not os.path.exists(CSV_FILE): return
