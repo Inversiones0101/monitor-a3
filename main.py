@@ -30,11 +30,25 @@ def obtener_ultimo_del_grafico(url):
 
 def obtener_datos_grafico(url):
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        # User-Agent robusto para que Ámbito crea que somos un navegador real
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+        }
         r = requests.get(url, headers=headers, timeout=15)
+        print(f"DEBUG: URL {url} - Status: {r.status_code}")
+        
         if r.status_code == 200:
-            return r.json() # Devuelve la lista completa [[hora, precio], ...]
-    except:
+            res = r.json()
+            # Validamos si es lista (formato viejo) o diccionario (formato nuevo)
+            if isinstance(res, list):
+                return res
+            elif isinstance(res, dict):
+                # Si es un dict, buscamos la clave donde suelen estar los datos
+                return res.get('datos', [])
+        return []
+    except Exception as e:
+        print(f"DEBUG: Error en petición: {e}")
         return []
 
 def manejar_datos():
@@ -115,17 +129,16 @@ def generar_y_enviar_reporte():
         print(f"Error envío: {e}")
 
 if __name__ == "__main__":
-    # 1. Siempre intentamos capturar datos y guardarlos cada 5 minutos
-    datos_guardados_ok = manejar_datos()
+    print("Iniciando proceso de captura...")
     
-    if datos_guardados_ok:
-        ahora = datetime.now()
-        
-        # 2. SOLO envía a Telegram si estamos cerca de la "hora en punto"
-        # Esto disparará el reporte a las 11:00, 12:00, 13:00, etc.
-        if ahora.minute < 5: 
-            print("Es hora del reporte horario. Generando gráfico...")
-            generar_y_enviar_reporte()
-        else:
-            print(f"Dato guardado a las {ahora.strftime('%H:%M')}. El próximo gráfico se enviará a la hora en punto.")
+    # 1. Intentamos capturar y guardar
+    datos_ok = manejar_datos()
+    
+    if datos_ok:
+        print("¡Éxito! Datos guardados en el CSV.")
+        # 2. Forzamos el envío ahora para ver si Telegram recibe
+        print("Generando y enviando reporte a Telegram...")
+        generar_y_enviar_reporte()
+    else:
+        print("ERROR: No se pudieron obtener datos. Mirá los 'Status' arriba.")
             
