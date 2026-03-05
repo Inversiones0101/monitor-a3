@@ -14,20 +14,37 @@ def obtener_precio_rava(ticker):
     url = f"https://www.rava.com/perfil/{ticker}"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
-        # Usamos sesión para ser más "humanos"
         session = requests.Session()
         r = session.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
             soup = BeautifulSoup(r.text, 'html.parser')
-            # Buscamos el precio en la clase 'ultimo'
-            precio_tag = soup.find('span', {'class': 'ultimo'})
-            if precio_tag:
-                val = precio_tag.text.replace('.', '').replace(',', '.').strip()
-                print(f"DEBUG: {ticker} encontrado: {val}")
+            
+            # Intentamos 3 formas distintas de encontrar el precio
+            # 1. Por clase 'ultimo'
+            tag = soup.find('span', {'class': 'ultimo'})
+            
+            # 2. Si falla, buscamos por el formato de número grande de Rava
+            if not tag:
+                tag = soup.select_one('span.precio-grande')
+            
+            # 3. Si sigue fallando, buscamos cualquier span que tenga un número con coma
+            if not tag:
+                for span in soup.find_all('span'):
+                    if ',' in span.text and len(span.text) < 15:
+                        # Verificamos que sea un número
+                        test_str = span.text.replace('.', '').replace(',', '').strip()
+                        if test_str.isdigit():
+                            tag = span
+                            break
+
+            if tag:
+                val = tag.text.replace('.', '').replace(',', '.').strip()
+                print(f"DEBUG: {ticker} capturado con éxito: {val}")
                 return float(val)
-        print(f"DEBUG: Error en {ticker}. Status: {r.status_code}")
+                
+        print(f"DEBUG: Rava respondió 200 pero no hallamos el precio de {ticker}")
     except Exception as e:
-        print(f"DEBUG: Error capturando {ticker}: {e}")
+        print(f"DEBUG: Error técnico en {ticker}: {e}")
     return None
 
 def ejecutar_prueba():
