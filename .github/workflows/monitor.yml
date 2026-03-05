@@ -20,7 +20,7 @@ jobs:
           python-version: '3.9'
 
       - name: Install deps
-        run: pip install requests pandas matplotlib
+        run: pip install requests pandas matplotlib beautifulsoup4 lxml
 
       - name: Run Bot
         env:
