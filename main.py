@@ -11,40 +11,29 @@ CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 CSV_FILE = 'datos_dia.csv'
 
 def obtener_precio_rava(ticker):
-    url = f"https://www.rava.com/perfil/{ticker}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    # Rava usa este endpoint interno para sus paneles
+    url = "https://www.rava.com/api/v2/empresas/perfil/post"
+    headers = {
+        'User-Agent': 'Mozilla/5.0',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://www.rava.com',
+        'Referer': f'https://www.rava.com/perfil/{ticker}'
+    }
+    # Le pedimos específicamente los datos del bono
+    payload = f"especie={ticker}"
+    
     try:
-        session = requests.Session()
-        r = session.get(url, headers=headers, timeout=15)
+        r = requests.post(url, headers=headers, data=payload, timeout=15)
         if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            
-            # Intentamos 3 formas distintas de encontrar el precio
-            # 1. Por clase 'ultimo'
-            tag = soup.find('span', {'class': 'ultimo'})
-            
-            # 2. Si falla, buscamos por el formato de número grande de Rava
-            if not tag:
-                tag = soup.select_one('span.precio-grande')
-            
-            # 3. Si sigue fallando, buscamos cualquier span que tenga un número con coma
-            if not tag:
-                for span in soup.find_all('span'):
-                    if ',' in span.text and len(span.text) < 15:
-                        # Verificamos que sea un número
-                        test_str = span.text.replace('.', '').replace(',', '').strip()
-                        if test_str.isdigit():
-                            tag = span
-                            break
-
-            if tag:
-                val = tag.text.replace('.', '').replace(',', '.').strip()
-                print(f"DEBUG: {ticker} capturado con éxito: {val}")
-                return float(val)
-                
-        print(f"DEBUG: Rava respondió 200 pero no hallamos el precio de {ticker}")
+            datos = r.json()
+            # El precio suele venir en la clave 'ultimo' o 'cotizacion'
+            precio = datos.get('ultimo')
+            if precio:
+                print(f"DEBUG: {ticker} pescado de la API: {precio}")
+                return float(precio)
+        print(f"DEBUG: API Rava {ticker} Status: {r.status_code}")
     except Exception as e:
-        print(f"DEBUG: Error técnico en {ticker}: {e}")
+        print(f"DEBUG: Error en API para {ticker}: {e}")
     return None
 
 def ejecutar_prueba():
