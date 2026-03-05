@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # <--- ESTO ES CLAVE para que el bot pueda guardar el CSV
+  contents: write  # Correcto: permite escribir en el repo
 
 jobs:
   build:
@@ -30,10 +30,8 @@ jobs:
 
       - name: Commit changes
         run: |
-          git config --global user.name "actions-user"
-          git config --global user.email "actions@github.com"
-          # El '|| true' evita que el workflow se ponga rojo si el archivo no está
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add datos_dia.csv || true 
-          git commit -m "Actualizar precios desde grafico [skip ci]" || echo "No hay cambios para guardar"
-          git push || echo "Nada para subir"
-          
+          # Solo hace commit si hay cambios reales en el archivo
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Actualizar precios [skip ci]" && git push)
