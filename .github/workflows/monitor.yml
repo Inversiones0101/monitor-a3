@@ -1,11 +1,15 @@
-name: Monitor A3 Realtime
+name: Monitor Financiero Pro
 on:
   schedule:
-    - cron: '*/5 13-21 * * 1-5' # De 10hs a 18hs ARG
-  workflow_dispatch:
+    # El cron usa hora UTC. 
+    # Argentina es UTC-3. 
+    # 13:30 UTC = 10:30 ARG (Apertura)
+    # 21:00 UTC = 18:00 ARG (Cierre y limpieza)
+    - cron: '*/5 13-21 * * 1-5'
+  workflow_dispatch: # Permite correrlo manualmente para probar
 
 permissions:
-  contents: write  # Correcto: permite escribir en el repo
+  contents: write
 
 jobs:
   build:
@@ -28,10 +32,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Commit changes
+      - name: Save History
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add datos_dia.csv || true 
-          # Solo hace commit si hay cambios reales en el archivo
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Actualizar precios [skip ci]" && git push)
+          git add datos_dia.csv || true
+          # Solo hace commit si el archivo cambió (nuevos datos) o si fue borrado (limpieza 18hs)
+          git commit -m "Actualizar historial/limpieza [skip ci]" || echo "Sin cambios"
+          git push
