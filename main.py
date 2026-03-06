@@ -11,7 +11,7 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 CSV_FILE = 'datos_dia.csv'
 
-def obtener_precio_titulo(ticker):
+def obtener_precio(ticker):
     url = f"https://www.rava.com/perfil/{ticker}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
@@ -19,72 +19,83 @@ def obtener_precio_titulo(ticker):
         if r.status_code == 200:
             soup = BeautifulSoup(r.text, 'html.parser')
             texto_titulo = soup.title.text
-            print(f"DEBUG: Título capturado para {ticker}: {texto_titulo}")
-            
-            # Buscamos el precio (formato 86.620,00)
+            # Buscamos el precio (formato 86.620,00 o 1.250.000,00)
             match = re.search(r'(\d{1,3}(\.\d{3})*,\d{2})', texto_titulo)
             if match:
                 return float(match.group(1).replace('.', '').replace(',', '.'))
-            
-            # Valores de prueba si el mercado está cerrado
-            if ticker == "AL30": return 86620.00
-            if ticker == "AL30D": return 67.50
-    except Exception as e:
-        print(f"ERROR en scrap {ticker}: {e}")
+    except: pass
     return None
 
 def main():
-    print(f"--- INICIANDO BOT ({datetime.now().strftime('%H:%M:%S')}) ---")
-    
-    al30_ars = obtener_precio_titulo("AL30")
-    al30_usd = obtener_precio_titulo("AL30D")
-    
-    if al30_ars and al30_usd:
-        mep = round(al30_ars / al30_usd, 2)
-        ahora = datetime.now().strftime('%H:%M')
-        
-        print(f"RESULTADO: AL30: ${al30_ars} | AL30D: u$s{al30_usd} | MEP: ${mep}")
-        
-        # Guardamos en el CSV
-        nuevo_dato = pd.DataFrame([{'fecha': ahora, 'mep': mep}])
-        
-        try:
-            nuevo_dato.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
-            df = pd.read_csv(CSV_FILE)
-            
-            # Limpieza de seguridad por si hay columnas viejas
-            if 'fecha' not in df.columns:
-                df.columns = ['fecha', 'mep']
-        except:
-            nuevo_dato.to_csv(CSV_FILE, index=False)
-            df = nuevo_dato
+    ahora_dt = datetime.now()
+    hora_str = ahora_dt.strftime('%H:%M')
+    print(f"--- INICIANDO CAPTURA ({hora_str}) ---")
 
-        # --- GENERAR GRÁFICO ---
-        plt.figure(figsize=(10, 5))
-        plt.plot(df['fecha'], df['mep'], marker='o', color='#1f77b4', linewidth=2)
-        plt.title(f"Evolución Dólar MEP - {datetime.now().strftime('%d/%m/%Y')}")
-        plt.xlabel("Hora")
-        plt.ylabel("Precio $")
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.savefig('grafico.png')
-        plt.close()
-        
-        # --- ENVÍO A TELEGRAM ---
-        mensaje = f"📊 *Reporte Rava Realtime*\n\n🔹 AL30: ${al30_ars}\n🔹 AL30D: u$s{al30_usd}\n\n💰 *MEP: ${mep}*"
-        url_tel = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-        
-        try:
-            with open('grafico.png', 'rb') as foto:
-                payload = {'chat_id': CHAT_ID, 'caption': mensaje, 'parse_mode': 'Markdown'}
-                files = {'photo': foto}
-                r = requests.post(url_tel, data=payload, files=files)
-                print(f"DEBUG Telegram Status: {r.status_code}")
-        except Exception as e:
-            print(f"ERROR enviando a Telegram: {e}")
-            
-        print("--- PROCESO COMPLETADO EXITOSAMENTE ---")
-    else:
-        print("--- PROCESO FALLIDO: No se obtuvieron precios ---")
+    # 1. Limpieza a las 18:00hs
+    if ahora_dt.hour >= 18 and os.path.exists(CSV_FILE):
+        os.remove(CSV_FILE)
+        print("Historial diario borrado. Preparado para mañana.")
+        return
+
+    # 2. Captura de datos
+    datos = {
+        'hora': hora_str,
+        'al30': obtener_precio("AL30"),
+        'al30d': obtener_precio("AL30D"),
+        'gd30': obtener_precio("GD30"),
+        'gd30d': obtener_precio("GD30D"),
+        'merval': obtener_precio("MERVAL")
+    }
+
+    # 3. Cálculos
+    if datos['al30'] and datos['al30d']:
+        datos['mep_al'] = round(datos['al30'] / datos['al30d'], 2)
+    if datos['gd30'] and datos['gd30d']:
+        datos['mep_gd'] = round(datos['gd30'] / datos['gd30d'], 2)
+    if datos['merval'] and 'mep_al' in datos:
+        datos['merval_usd'] = round(datos['merval'] / datos['mep_al'], 2)
+
+    # 4. Guardar en CSV
+    df_nuevo = pd.DataFrame([datos])
+    df_nuevo.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
+    
+    # 5. Lógica de Envío (Solo en horarios específicos)
+    horarios_reporte = ["11:00", "11:05", "13:00", "13:05", "15:00", "15:05", "17:00", "17:05"]
+    
+    # Para probar ahora, si querés forzar el envío, podés comentar el 'if'
+    if any(h in hora_str for h in horarios_reporte) or True: # Quitá el 'or True' para producción
+        generar_y_enviar_reporte(datos)
+
+def generar_y_enviar_reporte(datos):
+    df = pd.read_csv(CSV_FILE)
+    plt.style.use('dark_background') # ¡Estética Dark!
+    
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    
+    # Eje Izquierdo (Dólares/MEP)
+    ax1.plot(df['hora'], df['mep_al'], color='#ff4444', linewidth=3, label='MEP AL30 (Eje Izq)')
+    ax1.set_ylabel('Precio Dólar ($)', color='#ff4444')
+    
+    # Eje Derecho (Merval USD o Bonos Pesos)
+    ax2 = ax1.twinx()
+    ax2.plot(df['hora'], df['merval_usd'], color='#00ff00', linewidth=2, label='Merval USD (Eje Der)')
+    ax2.set_ylabel('Merval USD', color='#00ff00')
+
+    plt.title(f"MONITOR REALTIME - {datetime.now().strftime('%d/%m/%Y')}")
+    fig.tight_layout()
+    plt.savefig('reporte.png')
+    plt.close()
+
+    # Enviar a Telegram
+    mensaje = (f"🚀 *REPORTE FINANCIERO*\n\n"
+               f"💰 *MEP AL30:* ${datos.get('mep_al')}\n"
+               f"💰 *MEP GD30:* ${datos.get('mep_gd')}\n"
+               f"📈 *Merval USD:* u$s{datos.get('merval_usd')}\n\n"
+               f"🕒 Datos actualizados a las {datos['hora']}")
+    
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    with open('reporte.png', 'rb') as f:
+        requests.post(url, data={'chat_id': CHAT_ID, 'caption': mensaje, 'parse_mode': 'Markdown'}, files={'photo': f})
 
 if __name__ == "__main__":
     main()
