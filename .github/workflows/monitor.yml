@@ -1,11 +1,10 @@
 name: Monitor Financiero Pro
 on:
   schedule:
-    # El cron usa hora UTC. 
-    # Argentina es UTC-3. 
-    # 13:30 UTC = 10:30 ARG (Apertura)
-    # 21:00 UTC = 18:00 ARG (Cierre y limpieza)
-    - cron: '*/5 13-21 * * 1-5'
+    # 12:55 UTC es 09:55 ARG (5 min antes de abrir para calentar motores)
+    # 21:05 UTC es 18:05 ARG (Justo después de la limpieza final)
+    # Corre de lunes (1) a viernes (5)
+    - cron: '*/5 13-20 * * 1-5'
   workflow_dispatch: # Permite correrlo manualmente para probar
 
 permissions:
