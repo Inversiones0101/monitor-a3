@@ -29,13 +29,27 @@ def obtener_precio(ticker):
 def main():
     ahora_dt = datetime.now()
     hora_str = ahora_dt.strftime('%H:%M')
-    print(f"--- INICIANDO CAPTURA ({hora_str}) ---")
+    hora_actual = ahora_dt.hour
+    minuto_actual = ahora_dt.minute
+    dia_semana = ahora_dt.weekday() # 0=Lunes, 4=Viernes
 
-    # 1. Limpieza a las 18:00hs
-    if ahora_dt.hour >= 18 and os.path.exists(CSV_FILE):
-        os.remove(CSV_FILE)
-        print("Historial diario borrado. Preparado para mañana.")
+    # --- INTERRUPTOR DE SEGURIDAD Y LIMPIEZA ---
+    if dia_semana > 4: # Sábado o Domingo
+        print(f"--- MODO DORMIDO ({hora_str}) - Fin de semana ---")
         return
+    
+    if hora_actual < 10 or (hora_actual >= 18 and minuto_actual > 10):
+        # Si es la ventana de las 18:00, limpiamos el historial
+        if hora_actual == 18 and 0 <= minuto_actual <= 10:
+            if os.path.exists(CSV_FILE):
+                os.remove(CSV_FILE)
+                print(f"--- LIMPIEZA REALIZADA ({hora_str}) - Preparado para mañana ---")
+        else:
+            print(f"--- MODO DORMIDO ({hora_str}) - Fuera de mercado ---")
+        return
+
+    # --- SI EL BOT LLEGA AQUÍ, ES QUE EL MERCADO ESTÁ ABIERTO ---
+    print(f"--- INICIANDO CAPTURA ({hora_str}) ---")
 
     # 2. Captura de datos
     datos = {
