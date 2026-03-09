@@ -64,21 +64,33 @@ def main():
     # 3. Cálculos
     if datos['al30'] and datos['al30d']:
         datos['mep_al'] = round(datos['al30'] / datos['al30d'], 2)
+    
     if datos['gd30'] and datos['gd30d']:
         datos['mep_gd'] = round(datos['gd30'] / datos['gd30d'], 2)
+        
     if datos['merval'] and 'mep_al' in datos:
         datos['merval_usd'] = round(datos['merval'] / datos['mep_al'], 2)
 
     # 4. Guardar en CSV
     df_nuevo = pd.DataFrame([datos])
     df_nuevo.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
-    
-    # 5. Lógica de Envío (Solo en horarios específicos)
+
+    # 5. Lógica de Envío con "Paracaídas"
     horarios_reporte = ["11:00", "11:05", "13:00", "13:05", "15:00", "15:05", "17:00", "17:05"]
     
-    # Para probar ahora, si querés forzar el envío, podés comentar el 'if'
-    if any(h in hora_str for h in horarios_reporte) or True: # Quitá el 'or True' para producción
+    # Leemos el archivo para ver si tiene datos suficientes para el gráfico
+    df_historico = pd.read_csv(CSV_FILE)
+    
+    # Verificamos: ¿Es hora de reporte? ¿Y tenemos al menos 2 puntos para dibujar una línea?
+    es_hora = any(h in hora_str for h in horarios_reporte)
+    tiene_datos = len(df_historico) > 1 and 'mep_al' in df_historico.columns
+
+    if es_hora and tiene_datos:
         generar_y_enviar_reporte(datos)
+    else:
+        # Esto solo saldrá en los logs de GitHub para que sepas qué está pasando
+        razon = "No es horario de reporte" if not es_hora else "Esperando segundo dato para graficar"
+        print(f"--- REPORTE OMITIDO: {razon} ---")
 
 def generar_y_enviar_reporte(datos):
     df = pd.read_csv(CSV_FILE)
