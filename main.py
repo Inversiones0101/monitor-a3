@@ -89,9 +89,11 @@ def main():
     es_hora = any(h in hora_str for h in horarios_reporte)
     tiene_datos = len(df_historico) > 1 and 'mep_al' in df_historico.columns
 
-    if True: # Forzamos el envío para probar la conexión
-    generar_y_enviar_reporte(datos)
+    # 5. Lógica de Envío con "Paracaídas"
+    if True: # <--- Cambiamos esto para forzar la prueba
+        generar_y_enviar_reporte(datos) # <--- ¡CUIDADO! Esta línea debe tener 4 espacios de sangría
     else:
+    # ... el resto del código ...
         
         # Esto solo saldrá en los logs de GitHub para que sepas qué está pasando
         razon = "No es horario de reporte" if not es_hora else "Esperando segundo dato para graficar"
