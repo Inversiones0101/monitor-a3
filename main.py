@@ -35,27 +35,25 @@ def main():
     hora_str = ahora_dt.strftime('%H:%M')
     hora_actual = ahora_dt.hour
     minuto_actual = ahora_dt.minute
-    dia_semana = ahora_dt.weekday() # 0=Lunes, 4=Viernes
+    dia_semana = ahora_dt.weekday() 
 
-    # --- INTERRUPTOR DE SEGURIDAD Y LIMPIEZA ---
-    if dia_semana > 4: # Sábado o Domingo
+    # --- INTERRUPTOR DE SEGURIDAD ---
+    if dia_semana > 4:
         print(f"--- MODO DORMIDO ({hora_str}) - Fin de semana ---")
         return
     
     if hora_actual < 10 or (hora_actual >= 18 and minuto_actual > 10):
-        # Si es la ventana de las 18:00, limpiamos el historial
         if hora_actual == 18 and 0 <= minuto_actual <= 10:
             if os.path.exists(CSV_FILE):
                 os.remove(CSV_FILE)
-                print(f"--- LIMPIEZA REALIZADA ({hora_str}) - Preparado para mañana ---")
+                print(f"--- LIMPIEZA REALIZADA ({hora_str}) ---")
         else:
             print(f"--- MODO DORMIDO ({hora_str}) - Fuera de mercado ---")
         return
 
-    # --- SI EL BOT LLEGA AQUÍ, ES QUE EL MERCADO ESTÁ ABIERTO ---
     print(f"--- INICIANDO CAPTURA ({hora_str}) ---")
 
-    # 2. Captura de datos
+    # 2. Captura
     datos = {
         'hora': hora_str,
         'al30': obtener_precio("AL30"),
@@ -65,7 +63,7 @@ def main():
         'merval': obtener_precio("MERVAL")
     }
 
-    # 3. Cálculos
+    # 3. Cálculos (Solo si hay datos)
     if datos['al30'] and datos['al30d']:
         datos['mep_al'] = round(datos['al30'] / datos['al30d'], 2)
     
@@ -79,25 +77,18 @@ def main():
     df_nuevo = pd.DataFrame([datos])
     df_nuevo.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
 
-    # 5. Lógica de Envío con "Paracaídas"
-    horarios_reporte = ["11:00", "11:05", "13:00", "13:05", "15:00", "15:05", "17:00", "17:05"]
-    
-    # Leemos el archivo para ver si tiene datos suficientes para el gráfico
+    # 5. Lógica de Envío Inteligente
     df_historico = pd.read_csv(CSV_FILE)
     
-    # Verificamos: ¿Es hora de reporte? ¿Y tenemos al menos 2 puntos para dibujar una línea?
-    es_hora = any(h in hora_str for h in horarios_reporte)
-    tiene_datos = len(df_historico) > 1 and 'mep_al' in df_historico.columns
+    # Verificamos si las columnas necesarias existen y tienen datos
+    tiene_mep = 'mep_al' in df_historico.columns and not df_historico['mep_al'].isnull().all()
+    tiene_merval = 'merval_usd' in df_historico.columns and not df_historico['merval_usd'].isnull().all()
 
-    # 5. Lógica de Envío con "Paracaídas"
-    if True: # <--- Cambiamos esto para forzar la prueba
-        generar_y_enviar_reporte(datos) # <--- ¡CUIDADO! Esta línea debe tener 4 espacios de sangría
+    if True and tiene_mep and tiene_merval: # Forzamos para la prueba
+        print("🚀 Enviando reporte a Telegram...")
+        generar_y_enviar_reporte(datos)
     else:
-    # ... el resto del código ...
-        
-        # Esto solo saldrá en los logs de GitHub para que sepas qué está pasando
-        razon = "No es horario de reporte" if not es_hora else "Esperando segundo dato para graficar"
-        print(f"--- REPORTE OMITIDO: {razon} ---")
+        print("⚠️ Captura realizada pero faltan datos para el gráfico (Rava devolvió vacío)")
 
 def generar_y_enviar_reporte(datos):
     df = pd.read_csv(CSV_FILE)
