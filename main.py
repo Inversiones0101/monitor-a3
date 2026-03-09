@@ -85,7 +85,7 @@ def main():
     es_hora = any(h in hora_str for h in horarios_reporte)
     tiene_datos = len(df_historico) > 1 and 'mep_al' in df_historico.columns
 
-    if es_hora and tiene_datos:
+    if tiene_datos: # Quitamos la validación de hora temporalmente
         generar_y_enviar_reporte(datos)
     else:
         # Esto solo saldrá en los logs de GitHub para que sepas qué está pasando
