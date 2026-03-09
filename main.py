@@ -13,17 +13,21 @@ CSV_FILE = 'datos_dia.csv'
 
 def obtener_precio(ticker):
     url = f"https://www.rava.com/perfil/{ticker}"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     try:
-        r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            texto_titulo = soup.title.text
-            # Buscamos el precio (formato 86.620,00 o 1.250.000,00)
-            match = re.search(r'(\d{1,3}(\.\d{3})*,\d{2})', texto_titulo)
-            if match:
-                return float(match.group(1).replace('.', '').replace(',', '.'))
-    except: pass
+        response = requests.get(url, headers=headers, timeout=10)
+        # Buscamos el precio en el título: "AL30 - 86.380,00 - ..."
+        inicio = response.text.find("<title>") + 7
+        fin = response.text.find("</title>")
+        titulo = response.text[inicio:fin]
+        
+        # Extraemos solo el número (el segundo elemento después del guion)
+        partes = titulo.split("-")
+        if len(partes) > 1:
+            precio_str = partes[1].strip().replace(".", "").replace(",", ".")
+            return float(precio_str)
+    except Exception as e:
+        print(f"Error capturando {ticker}: {e}")
     return None
 
 def main():
@@ -85,9 +89,10 @@ def main():
     es_hora = any(h in hora_str for h in horarios_reporte)
     tiene_datos = len(df_historico) > 1 and 'mep_al' in df_historico.columns
 
-    if tiene_datos: # Quitamos la validación de hora temporalmente
-        generar_y_enviar_reporte(datos)
+    if True: # Forzamos el envío para probar la conexión
+    generar_y_enviar_reporte(datos)
     else:
+        
         # Esto solo saldrá en los logs de GitHub para que sepas qué está pasando
         razon = "No es horario de reporte" if not es_hora else "Esperando segundo dato para graficar"
         print(f"--- REPORTE OMITIDO: {razon} ---")
