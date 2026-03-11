@@ -22,34 +22,31 @@ def obtener_precio():
         response = requests.get(url, headers=headers, timeout=15)
         
         # Log para debug: nos dice si recibimos una página real o un error pequeño
-        print(f"Infiltración V3.1 - Tamaño de respuesta: {len(response.text)} caracteres")
+        print(f"Infiltración V3.2 - Tamaño de respuesta: {len(response.text)} caracteres")
         
-        # ESTRATEGIA A: Buscar el array de datos del gráfico (JSON)
-        # Buscamos patrones como 'datos: [...]' o 'this.datos = [...]'
-        match = re.search(r'datos\s*:\s*(\[.*?\])', response.text)
-        if not match:
-            match = re.search(r'this\.datos\s*=\s*(\[.*?\]);', response.text)
-
-        if match:
-            datos_json = match.group(1)
-            datos = json.loads(datos_json)
-            # Extraemos el último precio del array (el más reciente)
-            ultimo_precio = datos[-1]['ultimo']
-            print("Éxito: Dato extraído del array del gráfico.")
-            return float(ultimo_precio)
+        # ESTRATEGIA C (Visión Térmica): Buscar todos los precios en el código fuente
+        # Buscamos el patrón "ultimo":"87.140,00" que se repite en todo el historial del gráfico
+        precios_encontrados = re.findall(r'\{"ultimo":"([\d\.]+),(\d+)"', response.text)
         
-        # ESTRATEGIA B: Respaldo (Búsqueda de texto plano si el JS no está disponible)
+        if precios_encontrados:
+            # Tomamos el último precio de la lista (el punto más reciente del gráfico)
+            ultimo = precios_encontrados[-1]
+            # Convertimos (p.ej.) "87.140" y "00" -> "87140.00"
+            num_str = ultimo[0].replace('.', '') + '.' + ultimo[1]
+            
+            print(f"Éxito: Se encontraron {len(precios_encontrados)} puntos de datos. Usando el último del gráfico.")
+            return float(num_str)
+        
+        # ESTRATEGIA DE RESPALDO (Por si el formato cambia ligeramente)
         else:
-            print("Array no encontrado. Iniciando búsqueda de respaldo en texto plano...")
-            # Buscamos el patrón "ultimo":"87.140,00"
-            respaldo = re.search(r'"ultimo":"([\d\.]+),(\d+)"', response.text)
+            print("Patrón de gráfico no encontrado. Buscando alternativa en metadatos...")
+            respaldo = re.search(r'last_price":"([\d\.]+),(\d+)"', response.text)
             if respaldo:
-                # Convertimos "87.140,00" -> "87140.00"
                 num_str = respaldo.group(1).replace('.', '') + '.' + respaldo.group(2)
-                print("Éxito: Dato extraído de los metadatos de respaldo.")
+                print("Éxito: Dato extraído de metadatos alternativos.")
                 return float(num_str)
             
-            print("El Mamut bloqueó todos los accesos. No se encontró el precio.")
+            print("El Mamut bloqueó todos los accesos. No se detectaron patrones de precio.")
             return None
             
     except Exception as e:
@@ -74,7 +71,7 @@ def guardar_dato(precio):
     print(f"✅ HORMIGA VICTORIOSA: Guardado ${precio} a las {hora}")
 
 if __name__ == "__main__":
-    print("--- INICIANDO OPERACIÓN HORMIGA V3.1 ---")
+    print("--- INICIANDO OPERACIÓN HORMIGA V3.2 (VISIÓN TÉRMICA) ---")
     precio_actual = obtener_precio()
     
     if precio_actual:
