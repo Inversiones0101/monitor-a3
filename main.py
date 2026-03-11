@@ -27,19 +27,29 @@ def obtener_precio():
         for patron in patrones:
             precios = re.findall(patron, response.text)
             if precios:
-                # Tomamos el último precio encontrado (el más reciente del gráfico)
-                ultimo = precios[-1]
-                num_str = ultimo[0].replace('.', '') + '.' + ultimo[1]
-                print(f"¡HORMIGA ATÓMICA! Encontró el dato usando patrón: {patron}")
-                return float(num_str)
+                # Filtramos para encontrar el AL30 real (entre 80k y 95k)
+                candidatos = []
+                for p in precios:
+                    try:
+                        valor = float(p[0].replace('.', '') + '.' + p[1])
+                        if 80000 < valor < 98000: 
+                            candidatos.append(valor)
+                    except:
+                        continue
+                
+                if candidatos:
+                    # El último candidato válido es el precio actual del gráfico
+                    ultimo_real = candidatos[-1]
+                    print(f"Puntería Láser: {len(candidatos)} precios detectados. Usando: {ultimo_real}")
+                    return ultimo_real
         
-        # Si todo falla, buscamos el primer número grande que parezca el precio del AL30
-        # Buscamos algo como 86.950,00
-        emergencia = re.search(r'(\d{2}\.\d{3}),(\d{2})', response.text)
-        if emergencia:
-            num_str = emergencia.group(1).replace('.', '') + '.' + emergencia.group(2)
-            print("Éxito por búsqueda de emergencia (Fuerza Bruta).")
-            return float(num_str)
+        # Búsqueda de emergencia si el gráfico falla
+        emergencia = re.findall(r'(\d{2}\.\d{3}),(\d{2})', response.text)
+        for e in emergencia:
+            valor_e = float(e[0].replace('.', '') + '.' + e[1])
+            if 80000 < valor_e < 98000:
+                print(f"Captura por emergencia coherente: {valor_e}")
+                return valor_e
 
         return None
             
