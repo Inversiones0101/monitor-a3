@@ -1,8 +1,15 @@
-name: Monitor Financiero Pro
+name: Monitor Financiero Colmena V4
+
 on:
   schedule:
-    # 13:00 a 20:55 UTC (aprox 10:00 a 17:55 ARG con TZ configurado)
-    - cron: '*/5 13-20 * * 1-5'
+    # Programación en UTC (Argentina es UTC-3)
+    # 13:00 UTC -> 10:00 AM ART (Carga inicial y referencias)
+    # 14:00 UTC -> 11:00 AM ART (Reporte 1)
+    # 16:00 UTC -> 01:00 PM ART (Reporte 2)
+    # 18:00 UTC -> 03:00 PM ART (Reporte 3)
+    # 20:00 UTC -> 05:00 PM ART (Reporte 4 y Cierre)
+    # 21:00 UTC -> 06:00 PM ART (Limpieza y preparación mañana)
+    - cron: '0 13,14,16,18,20,21 * * 1-5'
   workflow_dispatch: 
 
 permissions:
@@ -14,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -21,19 +30,22 @@ jobs:
           python-version: '3.9'
 
       - name: Install deps
-        run: pip install requests pandas matplotlib beautifulsoup4 lxml
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas matplotlib beautifulsoup4 lxml
 
-      - name: Run Bot
+      - name: Run Monitor Colmena
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TZ: "America/Argentina/Buenos_Aires"
-        run: python main.py  # <--- ¡ESTA LÍNEA ES VITAL PARA QUE ARRANQUE!
+        run: python main.py
 
-      - name: Save History
+      - name: Guardar Memoria y Sincronizar
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add datos_dia.csv || true
-          git commit -m "Actualizar historial/limpieza [skip ci]" || echo "Sin cambios"
+          # Agregamos tanto el CSV de datos como el JSON de referencia de cierre
+          git add datos_bono.csv referencia_cierre.json || true
+          git commit -m "Bot: Sincronización de precios y memoria [skip ci]" || echo "Sin cambios"
           git push
