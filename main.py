@@ -14,43 +14,34 @@ def obtener_precio():
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
-        print(f"Infiltración V3.3 - Tamaño: {len(response.text)} caracteres")
+        print(f"Infiltración V3.5 - Tamaño: {len(response.text)} caracteres")
         
-        # BUSQUEDA ULTRA-FLEXIBLE: 
-        # Buscamos cualquier par de: "ultimo" : "87.140,00" o 'ultimo' : '87.140,00'
-        # Incluso si no hay comillas en la palabra ultimo.
+        # Patrones flexibles para detectar el formato de Rava
         patrones = [
             r'ultimo["\']?\s*:\s*["\']([\d\.]+),(\d+)["\']', 
-            r'curese["\']?\s*:\s*["\']([\d\.]+),(\d+)["\']'  # Respaldo por si usan 'cierre'
+            r'["\']?([\d\.]+),(\d+)["\']' 
         ]
         
+        candidatos = []
         for patron in patrones:
-            precios = re.findall(patron, response.text)
-            if precios:
-                # Filtramos para encontrar el AL30 real (entre 80k y 95k)
-                candidatos = []
-                for p in precios:
-                    try:
-                        valor = float(p[0].replace('.', '') + '.' + p[1])
-                        if 80000 < valor < 98000: 
-                            candidatos.append(valor)
-                    except:
-                        continue
-                
-                if candidatos:
-                    # El último candidato válido es el precio actual del gráfico
-                    ultimo_real = candidatos[-1]
-                    print(f"Puntería Láser: {len(candidatos)} precios detectados. Usando: {ultimo_real}")
-                    return ultimo_real
+            encontrados = re.findall(patron, response.text)
+            for p in encontrados:
+                try:
+                    # Convertimos el texto "86.920,00" a número 86920.0
+                    valor = float(p[0].replace('.', '') + '.' + p[1])
+                    # FILTRO DE PUNTERÍA: Solo precios coherentes con el AL30 hoy
+                    if 85000 < valor < 92000:
+                        candidatos.append(valor)
+                except:
+                    continue
         
-        # Búsqueda de emergencia si el gráfico falla
-        emergencia = re.findall(r'(\d{2}\.\d{3}),(\d{2})', response.text)
-        for e in emergencia:
-            valor_e = float(e[0].replace('.', '') + '.' + e[1])
-            if 80000 < valor_e < 98000:
-                print(f"Captura por emergencia coherente: {valor_e}")
-                return valor_e
-
+        if candidatos:
+            # Ordenamos para asegurar que no sea un dato viejo y tomamos el último del gráfico
+            # El gráfico intradiario suele ser la última lista de precios en el HTML
+            precio_final = candidatos[-1]
+            print(f"✅ PUNTERÍA LÁSER: Encontrados {len(candidatos)} puntos. Usando: ${precio_final}")
+            return precio_final
+        
         return None
             
     except Exception as e:
@@ -63,16 +54,19 @@ def guardar_dato(precio):
     fecha = ahora.strftime('%Y-%m-%d')
     hora = ahora.strftime('%H:%M:%S')
     es_nuevo = not os.path.exists(archivo_csv)
+    
     with open(archivo_csv, mode='a', newline='') as file:
         writer = csv.writer(file)
-        if es_nuevo: writer.writerow(['Fecha', 'Hora', 'Precio'])
+        if es_nuevo:
+            writer.writerow(['Fecha', 'Hora', 'Precio'])
         writer.writerow([fecha, hora, precio])
-    print(f"✅ DATO CAPTURADO: ${precio} a las {hora}")
+    
+    print(f"💾 ARCHIVADO: ${precio} guardado exitosamente.")
 
 if __name__ == "__main__":
-    print("--- EJECUTANDO HORMIGA ATÓMICA V3.3 ---")
+    print("--- EJECUTANDO HORMIGA ATÓMICA V3.5 (PUNTERÍA LÁSER) ---")
     precio = obtener_precio()
     if precio:
         guardar_dato(precio)
     else:
-        print("❌ El Mamut sigue escondiendo el precio. Necesitamos otra estrategia.")
+        print("❌ El Mamut ganó esta ronda. No se detectaron precios en el rango esperado.")
