@@ -3,54 +3,48 @@ import csv
 import datetime
 import os
 import re
-import json
 
 def obtener_precio():
     url = "https://www.rava.com/perfil/AL30"
-    
-    # Camuflaje reforzado: parecemos un humano entrando desde Google
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3",
-        "Referer": "https://www.google.com/",
-        "Connection": "keep-alive",
-        "DNT": "1"
+        "Referer": "https://www.google.com/"
     }
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
+        print(f"Infiltración V3.3 - Tamaño: {len(response.text)} caracteres")
         
-        # Log para debug: nos dice si recibimos una página real o un error pequeño
-        print(f"Infiltración V3.2 - Tamaño de respuesta: {len(response.text)} caracteres")
+        # BUSQUEDA ULTRA-FLEXIBLE: 
+        # Buscamos cualquier par de: "ultimo" : "87.140,00" o 'ultimo' : '87.140,00'
+        # Incluso si no hay comillas en la palabra ultimo.
+        patrones = [
+            r'ultimo["\']?\s*:\s*["\']([\d\.]+),(\d+)["\']', 
+            r'curese["\']?\s*:\s*["\']([\d\.]+),(\d+)["\']'  # Respaldo por si usan 'cierre'
+        ]
         
-        # ESTRATEGIA C (Visión Térmica): Buscar todos los precios en el código fuente
-        # Buscamos el patrón "ultimo":"87.140,00" que se repite en todo el historial del gráfico
-        precios_encontrados = re.findall(r'\{"ultimo":"([\d\.]+),(\d+)"', response.text)
-        
-        if precios_encontrados:
-            # Tomamos el último precio de la lista (el punto más reciente del gráfico)
-            ultimo = precios_encontrados[-1]
-            # Convertimos (p.ej.) "87.140" y "00" -> "87140.00"
-            num_str = ultimo[0].replace('.', '') + '.' + ultimo[1]
-            
-            print(f"Éxito: Se encontraron {len(precios_encontrados)} puntos de datos. Usando el último del gráfico.")
-            return float(num_str)
-        
-        # ESTRATEGIA DE RESPALDO (Por si el formato cambia ligeramente)
-        else:
-            print("Patrón de gráfico no encontrado. Buscando alternativa en metadatos...")
-            respaldo = re.search(r'last_price":"([\d\.]+),(\d+)"', response.text)
-            if respaldo:
-                num_str = respaldo.group(1).replace('.', '') + '.' + respaldo.group(2)
-                print("Éxito: Dato extraído de metadatos alternativos.")
+        for patron in patrones:
+            precios = re.findall(patron, response.text)
+            if precios:
+                # Tomamos el último precio encontrado (el más reciente del gráfico)
+                ultimo = precios[-1]
+                num_str = ultimo[0].replace('.', '') + '.' + ultimo[1]
+                print(f"¡HORMIGA ATÓMICA! Encontró el dato usando patrón: {patron}")
                 return float(num_str)
-            
-            print("El Mamut bloqueó todos los accesos. No se detectaron patrones de precio.")
-            return None
+        
+        # Si todo falla, buscamos el primer número grande que parezca el precio del AL30
+        # Buscamos algo como 86.950,00
+        emergencia = re.search(r'(\d{2}\.\d{3}),(\d{2})', response.text)
+        if emergencia:
+            num_str = emergencia.group(1).replace('.', '') + '.' + emergencia.group(2)
+            print("Éxito por búsqueda de emergencia (Fuerza Bruta).")
+            return float(num_str)
+
+        return None
             
     except Exception as e:
-        print(f"Error crítico en la infiltración: {e}")
+        print(f"Error: {e}")
         return None
 
 def guardar_dato(precio):
@@ -58,23 +52,17 @@ def guardar_dato(precio):
     ahora = datetime.datetime.now()
     fecha = ahora.strftime('%Y-%m-%d')
     hora = ahora.strftime('%H:%M:%S')
-    
-    # Verificamos si hay que escribir cabecera
     es_nuevo = not os.path.exists(archivo_csv)
-    
     with open(archivo_csv, mode='a', newline='') as file:
         writer = csv.writer(file)
-        if es_nuevo:
-            writer.writerow(['Fecha', 'Hora', 'Precio'])
+        if es_nuevo: writer.writerow(['Fecha', 'Hora', 'Precio'])
         writer.writerow([fecha, hora, precio])
-    
-    print(f"✅ HORMIGA VICTORIOSA: Guardado ${precio} a las {hora}")
+    print(f"✅ DATO CAPTURADO: ${precio} a las {hora}")
 
 if __name__ == "__main__":
-    print("--- INICIANDO OPERACIÓN HORMIGA V3.2 (VISIÓN TÉRMICA) ---")
-    precio_actual = obtener_precio()
-    
-    if precio_actual:
-        guardar_dato(precio_actual)
+    print("--- EJECUTANDO HORMIGA ATÓMICA V3.3 ---")
+    precio = obtener_precio()
+    if precio:
+        guardar_dato(precio)
     else:
-        print("❌ Operación fallida. El Mamut ganó esta ronda.")
+        print("❌ El Mamut sigue escondiendo el precio. Necesitamos otra estrategia.")
