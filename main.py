@@ -1,56 +1,80 @@
 import requests
-import re
 import os
 import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def hackear_precio_preciso(url, nombre, min_val, max_val):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": "https://www.google.com/"
-    }
-    try:
-        r = requests.get(url, headers=headers, timeout=20)
-        # Buscamos números con formato 12.345,67 o 123,45
-        encontrados = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2})', r.text)
-        
-        for e in encontrados:
-            val = float(e.replace('.', '').replace(',', '.'))
-            # FILTRO SNIPER: Solo aceptamos el número si cae en el rango lógico del activo
-            if min_val <= val <= max_val:
-                print(f"🎯 {nombre} encontrado con precisión: {val}")
-                return val
-        return None
-    except: return None
+# La URL mágica que encontraste en Network
+API_URL = "https://rofex.primary.ventures/api/v2/series/securities/rx_DDF_DLR_MAR26"
 
-def mision_final():
-    # Definimos rangos lógicos para no capturar el volumen (millones)
-    # AL30: entre 40k y 120k | AL30D: entre 40 y 150
-    p_arv = hackear_precio_preciso("https://www.rava.com/perfil/AL30", "AL30", 40000, 150000)
-    p_usd = hackear_precio_preciso("https://www.rava.com/perfil/AL30D", "AL30D", 40, 150)
+def extraer_datos_rofex():
+    # Usamos los headers que me pasaste en el cURL
+    params = {
+        "resolution": "5", # Intervalo de 5 minutos como en la web
+        "from": (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%dT00:00:00.000Z"),
+        "to": datetime.datetime.now().strftime("%Y-%m-%dT23:59:59.000Z")
+    }
+    headers = {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "referer": "https://rofex.primary.ventures/security/rx_DDF_DLR_MAR26?interval=5"
+    }
     
-    if p_arv and p_usd:
-        mep = p_arv / p_usd
-        ahora = datetime.datetime.now().strftime("%H:%M")
+    try:
+        r = requests.get(API_URL, params=params, headers=headers, timeout=20)
+        data = r.json()
         
-        # Guardar y Graficar (Igual al anterior pero con datos reales)
-        # ... (Tu lógica de gráfico aquí) ...
+        # Extraemos los precios de cierre (c) y el tiempo (t)
+        # La API de Rofex devuelve listas bajo 'c', 'h', 'l', 'o', 't'
+        precios = data.get('c', [])
+        tiempos = data.get('t', [])
         
-        token, chat = os.getenv('TELEGRAM_TOKEN'), os.getenv('TELEGRAM_CHAT_ID')
-        caption = f"✅ *MAMUT DOMADO*\n\n📈 *AL30:* ${p_arv:,.2f}\n📉 *AL30D:* u$s{p_usd:,.2f}\n🔥 *MEP REAL:* ${mep:.2f}"
+        if not precios:
+            print("❌ No hay datos en la respuesta de la API.")
+            return None
+            
+        # Convertimos UNIX timestamp a hora legible
+        horas = [datetime.datetime.fromtimestamp(t).strftime('%H:%M') for t in tiempos]
         
-        # Generar gráfico rápido para el ejemplo
+        df = pd.DataFrame({"hora": horas, "precio": precios})
+        print(f"✅ Capturados {len(df)} puntos de DLR MAR26")
+        return df
+    except Exception as e:
+        print(f"⚠️ Error al conectar con Rofex: {e}")
+        return None
+
+def ejecutar_mision():
+    df = extraer_datos_rofex()
+    if df is not None and not df.empty:
+        # Guardar en CSV
+        df.to_csv("datos_futuro.csv", index=False)
+        
+        ultimo_precio = df['precio'].iloc[-1]
+        apertura = df['precio'].iloc[0]
+
+        # Graficador Profesional (Estilo el que viste en la web)
         plt.style.use('dark_background')
-        plt.figure(figsize=(8, 4))
-        plt.plot([mep], marker='o', color='red')
-        plt.title(f"MEP ACTUAL: ${mep:.2f}")
-        plt.savefig("monitor_real.png")
+        plt.figure(figsize=(10, 5))
+        plt.fill_between(range(len(df)), df["precio"], apertura, color='#00ff00', alpha=0.15)
+        plt.plot(df["precio"].values, color='#00ff00', linewidth=2, label=f'DLR MAR26: ${ultimo_precio:,.2f}')
+        plt.axhline(y=apertura, color='white', linestyle='--', alpha=0.3, label='Apertura')
         
-        with open("monitor_real.png", 'rb') as f:
+        plt.title(f"MATBA ROFEX - DLR/MAR26 - ${ultimo_precio:,.2f}", color='#00ff00', fontweight='bold')
+        plt.grid(alpha=0.1)
+        plt.legend()
+        
+        img = "rofex_monitor.png"
+        plt.savefig(img, bbox_inches='tight')
+        plt.close()
+
+        # Enviar a Telegram
+        token = os.getenv('TELEGRAM_TOKEN')
+        chat = os.getenv('TELEGRAM_CHAT_ID')
+        caption = f"📈 *DÓLAR FUTURO MAR/26*\n\n💎 *Precio:* ${ultimo_precio:,.2f}\n⏱ *Hora:* {df['hora'].iloc[-1]}\n📊 *Variación Rueda:* {((ultimo_precio/apertura)-1)*100:.2f}%"
+        
+        with open(img, 'rb') as f:
             requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
                           data={'chat_id': chat, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
-        print("🚀 ¡Misión cumplida con datos reales!")
+        print("🚀 Monitor enviado con éxito.")
 
 if __name__ == "__main__":
-    mision_final()
+    ejecutar_mision()
