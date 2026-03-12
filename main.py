@@ -1,77 +1,78 @@
 import requests
 import os
 import datetime
+import pandas as pd
 import matplotlib.pyplot as plt
 
-ACTIVOS_RAVA = {
-    "AL30": "AL30",
-    "AL30D": "AL30D",
-    "GD30": "GD30",
-    "GD30D": "GD30D",
-    "GGAL": "GGAL",
-    "GGAL_US": "GGAL_US"
+# Diccionario de activos en Google Finance
+# Formato: "BCBA:TICKER" para Argentina
+ACTIVOS = {
+    "AL30": "BCBA:AL30",
+    "AL30D": "BCBA:AL30D",
+    "GD30": "BCBA:GD30",
+    "GD30D": "BCBA:GD30D",
+    "GGAL": "BCBA:GGAL"
 }
 
-def extraer_datos_api(ticker):
-    # Intentamos entrar por la puerta de datos con credenciales de navegador
-    url = f"https://www.rava.com/api/v1/instrumentos/perfil/intradia/{ticker}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Origin": "https://www.rava.com",
-        "Referer": f"https://www.rava.com/perfil/{ticker}"
-    }
-    
+def obtener_precio_google(ticker):
+    url = f"https://www.google.com/finance/quote/{ticker}"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        # Usamos una sesión para mantener cookies básicas
-        session = requests.Session()
-        r = session.get(url, headers=headers, timeout=15)
-        
-        if r.status_code == 200:
-            data = r.json()
-            precios = [float(p['ultimo']) for p in data.get('cuerpo', [])]
-            print(f"DEBUG {ticker}: {len(precios)} puntos capturados.")
-            return precios
-        else:
-            print(f"DEBUG {ticker}: Error de acceso (Status {r.status_code})")
-            return []
-    except Exception as e:
-        print(f"Error técnico en {ticker}: {e}")
-        return []
+        r = requests.get(url, headers=headers, timeout=10)
+        # Buscamos el precio en el meta-tag de Google
+        patron = r'data-last-price="([\d\.]+)"'
+        import re
+        match = re.search(patron, r.text)
+        if match:
+            precio = float(match.group(1))
+            print(f"✅ {ticker}: ${precio}")
+            return precio
+        return None
+    except:
+        return None
 
 def ejecutar_colmena():
-    tiras = {n: extraer_datos_api(t) for n, t in ACTIVOS_RAVA.items()}
+    precios = {n: obtener_precio_google(t) for n, t in ACTIVOS.items()}
     
-    # Verificamos si logramos entrar al menos a AL30
-    if len(tiras.get("AL30", [])) > 5:
-        p, d = tiras["AL30"], tiras["AL30D"]
-        min_l = min(len(p), len(d))
-        mep = [p[i]/d[i] for i in range(min_l)]
+    # Si tenemos AL30 y AL30D, calculamos MEP
+    if precios["AL30"] and precios["AL30D"]:
+        mep_actual = precios["AL30"] / precios["AL30D"]
         
-        plt.figure(figsize=(10, 6))
-        plt.plot(mep, color='#d62728', linewidth=2, label=f'MEP AL30: ${mep[-1]:.2f}')
-        plt.fill_between(range(len(mep)), mep, mep[0], color='red', alpha=0.1)
-        plt.axhline(y=mep[0], color='black', linestyle='--', alpha=0.6, label=f'Apertura: ${mep[0]:.2f}')
+        # Guardamos en un CSV para empezar a crear el historial de la tira
+        df_nuevo = pd.DataFrame([{
+            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "mep": mep_actual
+        }])
         
-        plt.title(f"MONITOR COLMENA - {datetime.datetime.now().strftime('%H:%M')} ARG", fontweight='bold')
-        plt.grid(True, alpha=0.2)
+        if os.path.exists("datos_bono.csv"):
+            df_hist = pd.read_csv("datos_bono.csv")
+            df_final = pd.concat([df_hist, df_nuevo]).tail(50) # Mantenemos los últimos 50 puntos
+        else:
+            df_final = df_nuevo
+            
+        df_final.to_csv("datos_bono.csv", index=False)
+
+        # Generar Gráfico
+        plt.figure(figsize=(10, 5))
+        plt.plot(df_final["mep"].values, color='red', marker='o', label=f'MEP AL30: ${mep_actual:.2f}')
+        plt.fill_between(range(len(df_final)), df_final["mep"], df_final["mep"].iloc[0], color='red', alpha=0.1)
+        plt.title(f"Monitor Colmena (Google Engine) - {df_nuevo['fecha'].iloc[0]}")
+        plt.grid(True, alpha=0.3)
         plt.legend()
         
-        img = "monitor_final.png"
-        plt.savefig(img, bbox_inches='tight')
+        img = "monitor.png"
+        plt.savefig(img)
         plt.close()
-        
+
         # Enviar a Telegram
         token = os.getenv('TELEGRAM_TOKEN')
         chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        caption = f"🚀 *COLMENA INFILTRADA*\n\n💰 *AL30:* ${p[-1]:,.2f}\n💵 *AL30D:* u$s{d[-1]:,.2f}\n🎯 *MEP:* ${mep[-1]:,.2f}"
+        caption = f"🐝 *COLMENA V5 (Google Engine)*\n\n💰 *AL30:* ${precios['AL30']}\n💵 *AL30D:* u$s{precios['AL30D']}\n🎯 *MEP:* ${mep_actual:.2f}"
         
         url_tg = f"https://api.telegram.org/bot{token}/sendPhoto"
         with open(img, 'rb') as f:
             requests.post(url_tg, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
-        print("✅ ÉXITO: Datos enviados a Telegram.")
-    else:
-        print("❌ El Mamut sigue bloqueando. Necesitamos cambiar de estrategia de acceso.")
+        print("🚀 Reporte enviado con éxito.")
 
 if __name__ == "__main__":
     ejecutar_colmena()
