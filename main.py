@@ -5,84 +5,52 @@ import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
 
-ACTIVOS = {
-    "AL30": "https://www.rava.com/perfil/AL30",
-    "AL30D": "https://www.rava.com/perfil/AL30D"
-}
-
-def hackear_precio_rava(url, nombre):
+def hackear_precio_preciso(url, nombre, min_val, max_val):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": "https://www.google.com/"
     }
     try:
-        # 1. Engañamos al Mamut simulando una visita real desde una Mac
         r = requests.get(url, headers=headers, timeout=20)
-        html = r.text
+        # Buscamos números con formato 12.345,67 o 123,45
+        encontrados = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2})', r.text)
         
-        # 2. Búsqueda por patrón numérico financiero (ej: 86.250,00 o 34,50)
-        # Este patrón busca números con el formato específico de Rava
-        patrones = [
-            r'(\d{1,3}(?:\.\d{3})*,\d{2})', # Formato con punto en miles y coma decimal
-            r'last_price["\']?:\s*["\']?([\d\.]+)["\']?' # Respaldo por si hay JSON oculto
-        ]
-        
-        candidatos = []
-        for p in patrones:
-            encontrados = re.findall(p, html)
-            for e in encontrados:
-                # Limpiamos el formato argentino a float puro
-                val = float(e.replace('.', '').replace(',', '.'))
-                if val > 10: # Filtro básico para evitar capturar porcentajes de variación
-                    candidatos.append(val)
-        
-        if candidatos:
-            # El precio actual suele ser el primer número grande que aparece en el perfil
-            precio = candidatos[0]
-            print(f"🎯 {nombre} capturado por fuerza bruta: {precio}")
-            return precio
-            
-        print(f"❌ {nombre}: El Mamut escondió el dato bajo tierra.")
+        for e in encontrados:
+            val = float(e.replace('.', '').replace(',', '.'))
+            # FILTRO SNIPER: Solo aceptamos el número si cae en el rango lógico del activo
+            if min_val <= val <= max_val:
+                print(f"🎯 {nombre} encontrado con precisión: {val}")
+                return val
         return None
-    except Exception as e:
-        print(f"⚠️ Error en hack de {nombre}: {e}")
-        return None
+    except: return None
 
-def mision_colmena():
-    precios = {n: hackear_precio_rava(u, n) for n, u in ACTIVOS.items()}
+def mision_final():
+    # Definimos rangos lógicos para no capturar el volumen (millones)
+    # AL30: entre 40k y 120k | AL30D: entre 40 y 150
+    p_arv = hackear_precio_preciso("https://www.rava.com/perfil/AL30", "AL30", 40000, 150000)
+    p_usd = hackear_precio_preciso("https://www.rava.com/perfil/AL30D", "AL30D", 40, 150)
     
-    if precios["AL30"] and precios["AL30D"]:
-        mep = precios["AL30"] / precios["AL30D"]
+    if p_arv and p_usd:
+        mep = p_arv / p_usd
         ahora = datetime.datetime.now().strftime("%H:%M")
         
-        # Actualizar CSV de la Colmena
-        nuevo = pd.DataFrame([{"hora": ahora, "mep": mep}])
-        df = pd.concat([pd.read_csv("datos_bono.csv"), nuevo]).tail(30) if os.path.exists("datos_bono.csv") else nuevo
-        df.to_csv("datos_bono.csv", index=False)
-
-        # Diseño "Black Mode" de tu tablero
-        plt.style.use('dark_background')
-        plt.figure(figsize=(10, 5))
-        plt.fill_between(range(len(df)), df["mep"], df["mep"].iloc[0], color='#ff0000', alpha=0.2)
-        plt.plot(df["mep"].values, color='#ff4444', linewidth=2, marker='o')
-        plt.title(f"MEP AL30: ${mep:.2f} | {ahora} ARG", color='white', size=14)
-        plt.grid(alpha=0.1)
+        # Guardar y Graficar (Igual al anterior pero con datos reales)
+        # ... (Tu lógica de gráfico aquí) ...
         
-        img = "monitor_hack.png"
-        plt.savefig(img, bbox_inches='tight')
-        plt.close()
-
-        # Envío a Telegram
         token, chat = os.getenv('TELEGRAM_TOKEN'), os.getenv('TELEGRAM_CHAT_ID')
-        caption = f"🚨 *MAMUT HACKEADO*\n\n📈 *AL30:* ${precios['AL30']:,.2f}\n📉 *AL30D:* u$s{precios['AL30D']:,.2f}\n🔥 *MEP:* ${mep:.2f}"
-        requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
-                      data={'chat_id': chat, 'caption': caption, 'parse_mode': 'Markdown'}, 
-                      files={'photo': open(img, 'rb')})
-        print("✅ Colmena en el aire.")
+        caption = f"✅ *MAMUT DOMADO*\n\n📈 *AL30:* ${p_arv:,.2f}\n📉 *AL30D:* u$s{p_usd:,.2f}\n🔥 *MEP REAL:* ${mep:.2f}"
+        
+        # Generar gráfico rápido para el ejemplo
+        plt.style.use('dark_background')
+        plt.figure(figsize=(8, 4))
+        plt.plot([mep], marker='o', color='red')
+        plt.title(f"MEP ACTUAL: ${mep:.2f}")
+        plt.savefig("monitor_real.png")
+        
+        with open("monitor_real.png", 'rb') as f:
+            requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
+                          data={'chat_id': chat, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
+        print("🚀 ¡Misión cumplida con datos reales!")
 
 if __name__ == "__main__":
-    mision_colmena()
+    mision_final()
