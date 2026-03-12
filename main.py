@@ -1,78 +1,85 @@
 import requests
+from bs4 import BeautifulSoup
 import os
 import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Diccionario de activos en Google Finance
-# Formato: "BCBA:TICKER" para Argentina
 ACTIVOS = {
-    "AL30": "BCBA:AL30",
-    "AL30D": "BCBA:AL30D",
-    "GD30": "BCBA:GD30",
-    "GD30D": "BCBA:GD30D",
-    "GGAL": "BCBA:GGAL"
+    "AL30": "https://www.rava.com/perfil/AL30",
+    "AL30D": "https://www.rava.com/perfil/AL30D",
+    "GD30": "https://www.rava.com/perfil/GD30",
+    "GD30D": "https://www.rava.com/perfil/GD30D"
 }
 
-def obtener_precio_google(ticker):
-    url = f"https://www.google.com/finance/quote/{ticker}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+def infiltrar_rava(url, nombre):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "es-ES,es;q=0.9"
+    }
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        # Buscamos el precio en el meta-tag de Google
-        patron = r'data-last-price="([\d\.]+)"'
-        import re
-        match = re.search(patron, r.text)
-        if match:
-            precio = float(match.group(1))
-            print(f"✅ {ticker}: ${precio}")
+        r = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        
+        # Buscamos el precio en la clase específica que usa Rava para el "Último"
+        # Si cambiaron la API, el dato sigue estando en el HTML para el usuario
+        elemento = soup.find("span", {"class": "ultimo"}) or soup.find("div", {"class": "precio-actual"})
+        
+        if elemento:
+            # Limpiamos el texto: "34.500,00" -> 34500.00
+            texto = elemento.text.strip().replace('.', '').replace(',', '.')
+            precio = float(''.join(c for c in texto if c.isdigit() or c == '.'))
+            print(f"✅ {nombre} capturado: {precio}")
             return precio
+        
+        print(f"⚠️ {nombre}: No se encontró el tag. El Mamut cambió el HTML.")
         return None
-    except:
+    except Exception as e:
+        print(f"❌ Error en {nombre}: {e}")
         return None
 
-def ejecutar_colmena():
-    precios = {n: obtener_precio_google(t) for n, t in ACTIVOS.items()}
+def ejecutar_mision():
+    precios = {n: infiltrar_rava(u, n) for n, u in ACTIVOS.items()}
     
-    # Si tenemos AL30 y AL30D, calculamos MEP
     if precios["AL30"] and precios["AL30D"]:
-        mep_actual = precios["AL30"] / precios["AL30D"]
+        mep = precios["AL30"] / precios["AL30D"]
+        ahora = datetime.datetime.now().strftime("%H:%M")
         
-        # Guardamos en un CSV para empezar a crear el historial de la tira
-        df_nuevo = pd.DataFrame([{
-            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "mep": mep_actual
-        }])
-        
+        # --- Lógica de Gráfico de Área (Tu diseño original) ---
+        # Guardamos el punto para construir la tira
+        nuevo_punto = pd.DataFrame([{"hora": ahora, "mep": mep}])
         if os.path.exists("datos_bono.csv"):
-            df_hist = pd.read_csv("datos_bono.csv")
-            df_final = pd.concat([df_hist, df_nuevo]).tail(50) # Mantenemos los últimos 50 puntos
+            df = pd.concat([pd.read_csv("datos_bono.csv"), nuevo_punto]).tail(40)
         else:
-            df_final = df_nuevo
-            
-        df_final.to_csv("datos_bono.csv", index=False)
+            df = nuevo_punto
+        df.to_csv("datos_bono.csv", index=False)
 
-        # Generar Gráfico
-        plt.figure(figsize=(10, 5))
-        plt.plot(df_final["mep"].values, color='red', marker='o', label=f'MEP AL30: ${mep_actual:.2f}')
-        plt.fill_between(range(len(df_final)), df_final["mep"], df_final["mep"].iloc[0], color='red', alpha=0.1)
-        plt.title(f"Monitor Colmena (Google Engine) - {df_nuevo['fecha'].iloc[0]}")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
+        plt.figure(figsize=(10, 6), facecolor='#1a1a1a')
+        ax = plt.gca()
+        ax.set_facecolor('#1a1a1a')
+        
+        # Dibujamos el área roja de tu diseño
+        plt.fill_between(range(len(df)), df["mep"], df["mep"].iloc[0], color='red', alpha=0.3)
+        plt.plot(df["mep"].values, color='#ff4d4d', linewidth=3, marker='o', markersize=4)
+        
+        plt.title(f"MONITOR COLMENA - MEP AL30: ${mep:.2f}", color='white', fontweight='bold')
+        plt.xticks(range(len(df)), df["hora"], rotation=45, color='gray')
+        plt.yticks(color='gray')
+        plt.grid(alpha=0.1, color='white')
         
         img = "monitor.png"
-        plt.savefig(img)
+        plt.savefig(img, bbox_inches='tight', facecolor='#1a1a1a')
         plt.close()
 
         # Enviar a Telegram
         token = os.getenv('TELEGRAM_TOKEN')
         chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        caption = f"🐝 *COLMENA V5 (Google Engine)*\n\n💰 *AL30:* ${precios['AL30']}\n💵 *AL30D:* u$s{precios['AL30D']}\n🎯 *MEP:* ${mep_actual:.2f}"
-        
         url_tg = f"https://api.telegram.org/bot{token}/sendPhoto"
+        caption = f"🎯 *INFILTRACIÓN EXITOSA*\n\n💰 *AL30:* ${precios['AL30']:,.2f}\n💵 *AL30D:* u$s{precios['AL30D']:,.2f}\n🔥 *MEP:* ${mep:.2f}"
+        
         with open(img, 'rb') as f:
             requests.post(url_tg, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
-        print("🚀 Reporte enviado con éxito.")
+        print("🚀 Reporte enviado.")
 
 if __name__ == "__main__":
-    ejecutar_colmena()
+    ejecutar_mision()
