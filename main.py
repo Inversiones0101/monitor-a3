@@ -1,100 +1,71 @@
 import requests
-import re
 import os
 import json
 import datetime
-import pandas as pd
 import matplotlib.pyplot as plt
 
-ACTIVOS = {
-    "AL30": "https://www.rava.com/perfil/AL30",
-    "AL30D": "https://www.rava.com/perfil/AL30D",
-    "GD30": "https://www.rava.com/perfil/GD30",
-    "GD30D": "https://www.rava.com/perfil/GD30D",
-    "GGAL": "https://www.rava.com/perfil/GGAL",
-    "GGAL_US": "https://www.rava.com/perfil/GGAL_US",
-    "CAUCION": "https://www.rava.com/perfil/CAUCION%201D"
+# --- CONFIGURACIÓN DE ACTIVOS (IDs internos de Rava) ---
+# Usamos los nombres que Rava usa en su sistema de datos
+ACTIVOS_RAVA = {
+    "AL30": "AL30",
+    "AL30D": "AL30D",
+    "GD30": "GD30",
+    "GD30D": "GD30D",
+    "GGAL": "GGAL",
+    "GGAL_US": "GGAL_US"
 }
 
-def obtener_memoria():
-    if os.path.exists('referencia_cierre.json'):
-        try:
-            with open('referencia_cierre.json', 'r') as f:
-                return json.load(f)
-        except: return {}
-    return {}
-
-def extraer_tira_robusta(url, nombre):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"}
+def extraer_datos_directos(ticker):
+    # Esta es la URL de la API que alimenta el gráfico intradiario
+    url = f"https://www.rava.com/api/v1/instrumentos/perfil/intradia/{ticker}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": f"https://www.rava.com/perfil/{ticker}"
+    }
     try:
         r = requests.get(url, headers=headers, timeout=15)
-        html = r.text
-        
-        # PATRÓN 1: El clásico de Rava (ultimo:"123,45")
-        patrones = [
-            r'ultimo["\']?\s*:\s*["\']?([\d\.]+),(\d+)["\']?',
-            r'cierre["\']?\s*:\s*["\']?([\d\.]+),(\d+)["\']?',
-            r'["\']?value["\']?\s*:\s*([\d\.]+)' # Plan C para otros activos
-        ]
-        
-        precios = []
-        for p in patrones:
-            encontrados = re.findall(p, html)
-            if encontrados:
-                for e in encontrados:
-                    if isinstance(e, tuple):
-                        precios.append(float(e[0].replace('.', '') + '.' + e[1]))
-                    else:
-                        precios.append(float(e))
-                if precios: break # Si encontramos con un patrón, no seguimos buscando
-
-        print(f"DEBUG {nombre}: {len(precios)} puntos detectados.")
+        data = r.json()
+        # Extraemos solo los precios de la serie de tiempo
+        precios = [float(punto['ultimo']) for punto in data.get('cuerpo', [])]
+        print(f"DEBUG {ticker}: {len(precios)} puntos obtenidos de la API.")
         return precios
-    except:
+    except Exception as e:
+        print(f"Error en API para {ticker}: {e}")
         return []
 
-def generar_grafico(tiras, memoria):
-    # Usamos AL30 como ejemplo principal para el reporte
-    if not tiras.get("AL30") or not tiras.get("AL30D"): return None
+def generar_y_enviar():
+    tiras = {nombre: extraer_datos_directos(ticker) for nombre, ticker in ACTIVOS_RAVA.items()}
     
-    plt.figure(figsize=(10, 6))
-    p, d = tiras["AL30"], tiras["AL30D"]
-    min_l = min(len(p), len(d))
-    mep = [p[i]/d[i] for i in range(min_l)]
-    
-    ref = memoria.get("cierre_AL30", mep[0])
-    plt.fill_between(range(len(mep)), mep, ref, color='red', alpha=0.2)
-    plt.plot(mep, color='red', label=f'MEP AL30: {mep[-1]:.2f}')
-    plt.axhline(y=ref, color='black', linestyle='--', alpha=0.5)
-    
-    plt.title(f"Monitor MEP - {datetime.datetime.now().strftime('%H:%M')}")
-    plt.legend()
-    path = "monitor.png"
-    plt.savefig(path)
-    plt.close()
-    return path
-
-def enviar_telegram(img, tiras):
-    token = os.getenv('TELEGRAM_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
-    if not img or not token: return
-    
-    txt = "📊 *PRECIOS ACTUALES*\n"
-    for k, v in tiras.items():
-        if v: txt += f"• {k}: ${v[-1]:,.2f}\n"
+    # Verificamos si tenemos los datos base para el MEP
+    if len(tiras.get("AL30", [])) > 0 and len(tiras.get("AL30D", [])) > 0:
+        p, d = tiras["AL30"], tiras["AL30D"]
+        min_l = min(len(p), len(d))
+        mep = [p[i]/d[i] for i in range(min_l)]
         
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
-    with open(img, 'rb') as f:
-        requests.post(url, data={'chat_id': chat_id, 'caption': txt, 'parse_mode': 'Markdown'}, files={'photo': f})
+        # Crear Gráfico
+        plt.figure(figsize=(10, 6))
+        plt.plot(mep, color='red', linewidth=2, label=f'MEP AL30 Actual: {mep[-1]:.2f}')
+        plt.fill_between(range(len(mep)), mep, mep[0], color='red', alpha=0.1)
+        plt.axhline(y=mep[0], color='black', linestyle='--', label='Apertura')
+        plt.title(f"Monitor Colmena - {datetime.datetime.now().strftime('%H:%M')}")
+        plt.legend()
+        plt.grid(True, alpha=0.2)
+        
+        img_path = "monitor.png"
+        plt.savefig(img_path)
+        plt.close()
+        
+        # Enviar a Telegram
+        token = os.getenv('TELEGRAM_TOKEN')
+        chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        caption = f"📊 *COLMENA UPDATE*\n• AL30: ${p[-1]:,.2f}\n• AL30D: u$s{d[-1]:,.2f}\n• *MEP: ${mep[-1]:,.2f}*"
+        
+        url_tg = f"https://api.telegram.org/bot{token}/sendPhoto"
+        with open(img_path, 'rb') as f:
+            requests.post(url_tg, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': f})
+        print("✅ Reporte enviado a Telegram.")
+    else:
+        print("❌ Datos insuficientes en la API para generar el reporte.")
 
 if __name__ == "__main__":
-    mem = obtener_memoria()
-    tiras = {n: extraer_tira_robusta(u, n) for n, u in ACTIVOS.items()}
-    
-    img = generar_grafico(tiras, mem)
-    if img:
-        enviar_telegram(img, tiras)
-        # Guardar cierre si es hora
-        if datetime.datetime.now().hour >= 17:
-            with open('referencia_cierre.json', 'w') as f:
-                json.dump({"cierre_AL30": tiras["AL30"][-1]/tiras["AL30D"][-1]}, f)
+    generar_y_enviar()
