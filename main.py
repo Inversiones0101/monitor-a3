@@ -4,70 +4,89 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# Configuración (Reemplazá con tus datos de Telegram)
-TOKEN = "TU_TELEGRAM_TOKEN"
-CHAT_ID = "TU_CHAT_ID"
+# 1. Configuración vía Variables de Entorno (GitHub Secrets)
+TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 URL_BONDS = "https://data912.com/live/arg_bonds"
 CSV_FILE = "prueba_cierre_al30.csv"
 
 def get_data():
     try:
-        response = requests.get(URL_BONDS)
+        # Agregamos un timeout para que el script no se cuelgue si la web tarda
+        response = requests.get(URL_BONDS, timeout=10)
         data = response.json()
         
-        # Extraemos AL30 y AL30D
+        # Buscamos AL30 y AL30D en el JSON de Data912
         al30 = next(item for item in data if item['symbol'] == 'AL30')
         al30d = next(item for item in data if item['symbol'] == 'AL30D')
         
-        precio_ars = al30['c']
-        precio_usd = al30d['c']
+        precio_ars = float(al30['c'])
+        precio_usd = float(al30d['c'])
         mep = precio_ars / precio_usd
-        timestamp = time.strftime("%H:%M:%S")
+        # Hora local Argentina
+        timestamp = time.strftime("%H:%M")
         
         return {"hora": timestamp, "al30": precio_ars, "al30d": precio_usd, "mep": mep}
     except Exception as e:
-        print(f"Error capturando datos: {e}")
+        print(f"⚠️ Error capturando datos: {e}")
         return None
 
-def enviar_grafico(df):
-    plt.figure(figsize=(10, 6))
+def enviar_telegram(imagen_path, df_final):
+    last_mep = df_final['mep'].iloc[-1]
+    caption = f"📊 *Reporte Cierre de Rueda*\n\n🔹 **AL30:** ${df_final['al30'].iloc[-1]:.2f}\n🔹 **AL30D:** u$s {df_final['al30d'].iloc[-1]:.2f}\n\n💵 **Dólar MEP:** ${last_mep:.2f}"
     
-    # Eje para Precios
-    ax1 = plt.gca()
-    ax1.plot(df['hora'], df['al30'], color='blue', label='AL30 (ARS)')
-    ax1.set_xlabel('Hora')
-    ax1.set_ylabel('Precio ARS', color='blue')
-    
-    # Eje para MEP
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    with open(imagen_path, 'rb') as photo:
+        payload = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
+        files = {'photo': photo}
+        requests.post(url, data=payload, files=files)
+
+def generar_grafico(df):
+    plt.style.use('ggplot') # Estilo más limpio
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # Eje 1: Precio del Bono
+    ax1.set_xlabel('Hora del Mercado')
+    ax1.set_ylabel('Precio AL30 (ARS)', color='tab:blue', fontweight='bold')
+    ax1.plot(df['hora'], df['al30'], color='tab:blue', marker='o', label='AL30 (Pesos)')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    # Eje 2: Dólar MEP (Doble eje)
     ax2 = ax1.twinx()
-    ax2.plot(df['hora'], df['mep'], color='green', linestyle='--', label='Dólar MEP')
-    ax2.set_ylabel('Dólar MEP', color='green')
+    ax2.set_ylabel('Dólar MEP ($)', color='tab:green', fontweight='bold')
+    ax2.plot(df['hora'], df['mep'], color='tab:green', linestyle='--', linewidth=2, label='Dólar MEP')
+    ax2.tick_params(axis='y', labelcolor='tab:green')
+
+    plt.title(f"Monitor AL30 vs MEP - Sprint de Cierre\n{time.strftime('%d/%m/%Y')}", fontsize=14)
+    fig.tight_layout()
     
-    plt.title(f"Monitor AL30 vs MEP - Cierre de Mercado\n{time.strftime('%d/%m/%Y')}")
-    plt.savefig("grafico_prueba.png")
-    
-    # Envío a Telegram
-    with open("grafico_prueba.png", 'rb') as photo:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", 
-                      data={'chat_id': CHAT_ID, 'caption': "📊 Reporte de 20 min - AL30 & MEP"}, 
-                      files={'photo': photo})
+    path_grafico = "grafico_prueba.png"
+    plt.savefig(path_grafico)
+    plt.close()
+    return path_grafico
 
-# --- CICLO DE PRUEBA ---
-puntos = []
-print("🚀 Iniciando monitor de 20 minutos...")
+# --- EJECUCIÓN PRINCIPAL ---
+if __name__ == "__main__":
+    puntos = []
+    print(f"🚀 Iniciando captura de 20 puntos (1 por minuto)... {time.strftime('%H:%M:%S')}")
 
-while len(puntos) < 20:
-    nuevo_punto = get_data()
-    if nuevo_punto:
-        puntos.append(nuevo_punto)
-        print(f"📍 Punto {len(puntos)}/20: MEP ${nuevo_punto['mep']:.2f}")
+    for i in range(20):
+        dato = get_data()
+        if dato:
+            puntos.append(dato)
+            print(f"✅ Punto {i+1}/20: MEP ${dato['mep']:.2f}")
+            
+            # Guardamos progreso en CSV por seguridad
+            pd.DataFrame(puntos).to_csv(CSV_FILE, index=False)
         
-        # Guardar en CSV
-        df = pd.DataFrame(puntos)
-        df.to_csv(CSV_FILE, index=False)
-        
-    time.sleep(60) # Esperar 1 minuto
+        # Esperar 60 segundos excepto en el último punto
+        if i < 19:
+            time.sleep(60)
 
-print("📈 Generando y enviando gráfico...")
-enviar_grafico(df)
-print("✅ Prueba finalizada.")
+    if len(puntos) > 0:
+        df_final = pd.DataFrame(puntos)
+        ruta_img = generar_grafico(df_final)
+        enviar_telegram(ruta_img, df_final)
+        print("🏁 Proceso completado y enviado a Telegram.")
+    else:
+        print("❌ No se pudieron recolectar datos.")
