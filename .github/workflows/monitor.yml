@@ -1,1 +1,57 @@
+name: Monitor AL30 Intradiario
 
+on:
+  schedule:
+    # Cada 5 minutos, de 12:00 a 21:00 UTC (= 09:00 a 18:00 AR)
+    # Lunes a Viernes únicamente
+    - cron: '*/5 12-21 * * 1-5'
+
+  # Permite ejecución manual desde la pestaña Actions (para pruebas)
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Necesario para que el bot pueda guardar el CSV en el repo
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5   # Cada ejecución debe durar ~15 seg. 5 min es margen generoso.
+
+    steps:
+
+      # 1. Checkout del repositorio con credenciales persistentes
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      # 2. Configurar Python 3.11
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'   # Cachea dependencias → instalación más rápida
+
+      # 3. Instalar dependencias
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Ejecutar el bot con zona horaria Argentina
+      - name: Ejecutar Monitor
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TZ: "America/Argentina/Buenos_Aires"
+        run: python main.py
+
+      # 5. Guardar cambios en el repo (CSV actualizado, gráfico, estado)
+      #    El [skip ci] en el mensaje evita que el commit dispare otro workflow
+      - name: Guardar datos en repo
+        run: |
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add datos_al30.csv grafico_al30.png estado_envios.csv || true
+          git commit -m "Bot: actualización de datos [skip ci]" || echo "Sin cambios nuevos"
+          git push
