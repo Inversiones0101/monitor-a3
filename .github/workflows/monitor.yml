@@ -47,11 +47,14 @@ jobs:
         run: python main.py
 
       # 5. Guardar cambios en el repo (CSV actualizado, gráfico, estado)
-      #    El [skip ci] en el mensaje evita que el commit dispare otro workflow
+      #    Cada archivo se agrega individualmente — si no existe, se ignora sin error.
+      #    El [skip ci] evita que el commit dispare otro workflow.
       - name: Guardar datos en repo
         run: |
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add datos_al30.csv grafico_al30.png estado_envios.csv || true
-          git commit -m "Bot: actualización de datos [skip ci]" || echo "Sin cambios nuevos"
-          git push
+          [ -f datos_al30.csv   ] && git add datos_al30.csv
+          [ -f grafico_al30.png ] && git add grafico_al30.png
+          [ -f estado_envios.csv ] && git add estado_envios.csv
+          git diff --staged --quiet && echo "Sin cambios nuevos" || git commit -m "Bot: actualización de datos [skip ci]"
+          git push || echo "Nada que pushear"
